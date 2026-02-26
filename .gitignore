@@ -1,0 +1,23 @@
+# OS files
+.DS_Store
+
+# Auth / secrets
+auth*.json
+
+# Local runtime state
+.codex-global-state.json
+.personality_migration
+models_cache.json
+history.jsonl
+
+# Runtime directories
+log/
+tmp/
+sessions/
+shell_snapshots/
+archived_sessions/
+sqlite/
+
+# Local workspace caches
+worktrees/
+vendor_imports/
