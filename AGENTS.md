@@ -1,37 +1,74 @@
 # Codex Global Rules (Common, Evidence-First)
 
 ## 0) Session bootstrap (hard rule)
-- Before doing any work, explicitly invoke the skill: `using-superpowers`.
-- Proof step (first response in every new thread):
-  - State: `using-superpowers invoked: yes`
-- If the skill is not available / not discoverable, report exactly: `Missing skill: using-superpowers`, then continue the work.
+- When starting any conversation, explicitly invoke the skill: `using-superpowers`.
+- First response SHOULD include: 已启用技能`using-superpowers`
+- If missing, reply 无法启用技能`using-superpowers`, then continue.
+- Second response MUST include a `Role Plan` with:
+  - Mode: `a) multi-agent` or `b) single-thread with sub-agents`
+  - Assigned roles: at least Orchestrator/Default + Explorer + Worker + Reviewer + Tester
+  - Handoff chain: one line
+- For non-trivial tasks, default Role Plan mode is `a) multi-agent`.
+- If using `b)` for a non-trivial task, explicitly justify why true multi-agent has no material benefit yet.
+- If Role Plan is missing, output exactly: `BLOCK: missing Role Plan`.
 
 ## 1) Grounding (no invention)
 - Do not invent APIs, configurations, commands, file paths, or repository structure.
 - If uncertain, search the repository and cite the exact file/path you found before making changes.
 
 ## 2) Multi-agent + sub-agent discipline (hard rules)
-- Separation of duties among multi-agents is mandatory:
-  - Worker (implements approved changes)
-  - Tester (runs independent final verification and records raw outputs)
-  - Reviewer (approves plans and issues final PASS/FAIL)
-  - Explorer (investigates and gathers evidence)
-  - Default/Orchestrator (scope definition, role assignment, gate control, and final summary ownership)
-- Standard handoff chain:
-  - Explorer -> Reviewer (Gate B plan review) -> Worker -> Tester -> Reviewer
-- Write actions must be isolated:
-  - If using multi-agents: only one designated implementation role may edit repo-tracked files in a given change step.
-  - Worker is the designated implementation role for repo-tracked changes.
-  - If multi-agents are not available: emulate roles using separate threads (or separate worktrees) and treat each thread as an isolated agent.
-- Prefer sub-agents for read-heavy tasks to keep the main thread clean:
-  - repo search / dependency tracing / log analysis / test execution / docs reading
+- Non-trivial tasks include but are not limited to code/config changes, debugging, refactors, releases, migrations, and complex reviews/audits/governance checks; they default to `multi-agent`.
+- Simple task exception: single-step lookup, brief explanation, or trivial command may stay single-thread until scope expands.
+- Main thread is always Orchestrator/Default. It owns Role Plan creation, role assignment, gate control, convergence, integration order, and final summary.
+- Do not start investigation or implementation before a Role Plan exists. Missing Role Plan => `BLOCK: missing Role Plan`.
+- Default non-trivial handoff:
+  - `Orchestrator -> Explorer(s) -> Orchestrator -> Reviewer (Plan Gate) -> Worker(s) -> Reviewer (Pre-Merge) -> Orchestrator (main integration) -> Tester -> Reviewer -> Orchestrator`
+
+- Investigation:
+  - Start from a multi-root-cause assumption unless the task is truly simple.
+  - For non-trivial investigation, assign at least two Explorer lanes by default.
+  - Each Explorer lane must be distinct (subsystem, evidence surface, or hypothesis lane).
+  - If multiple Explorer results converge to one root cause, Orchestrator must publish one unified root-cause statement and one unified repair plan before Gate B.
+
+- Execution:
+  - Only Worker may edit repo-tracked files.
+  - If true multi-agent is unavailable, emulate role separation with separate threads or separate worktrees.
+  - Long-running agent waits are Monitor-owned by default; Orchestrator consumes Monitor status instead of repeatedly waiting directly.
+  - Checkpoint escalation applies only to Worker-owned implementation waits.
+  - Read-heavy tasks should prefer sub-agents.
+  - If the approved plan has 2+ independent implementation slices, assign multiple Worker lanes.
+  - Every Worker lane must use its own isolated worktree and branch.
+  - Reviewer must issue `Pre-Merge Verdict: PASS` before Orchestrator merges that Worker result into main.
+  - Final independent verification and final PASS/FAIL apply only to the integrated main snapshot.
+
+- Worker Interrupt Gate Supplement:
+  - Worker task must be a Frozen Worker Task before implementation starts.
+  - A Frozen Worker Task is single-goal, scope-frozen, acceptance-frozen, and expected to produce reviewable output in one short cycle.
+  - Two Worker wait rounds without reviewable delivery => request checkpoint; do not keep waiting blindly.
+  - Non-emergency interrupt requires a complete Checkpoint Package first.
+  - New evidence is absorbed by Orchestrator first; interrupt only if the current direction is proven wrong.
+  - Checkpoint Package is the minimum reviewable interrupted-delivery artifact and must include:
+    - Current Diff / Snapshot
+    - Executed Commands + Key Output
+    - Progress State
+    - Remaining Blocker
+  - Implementation, acceptance, and evidence-gathering must not be mixed inside one unfrozen Worker lifecycle.
+
+- Parallelism:
+  - Investigation may be parallel before root-cause independence is proven.
+  - Implementation and verification may be parallel only when task slices are explicitly independent.
+  - If slices are not independent, Orchestrator must serialize them.
+
+- Every gate-advancing message must start with:
+  - `Role: <Orchestrator/Default|Explorer|Worker|Reviewer|Tester|Monitor>`
 
 ## 3) Change strategy (reduce failure modes)
 - Prefer small, reviewable diffs. Avoid large refactors unless explicitly requested.
 - Keep changes consistent with existing style and architecture.
-- If parallel work is needed:
-  - Use separate branches/worktrees per implementation agent.
-  - Merge only after independent review + verification sign-off.
+- Parallel implementation requires separate branches/worktrees per Worker.
+- Reviewer approves each Worker lane before integration.
+- Orchestrator merges approved Worker lanes into main in declared order.
+- Final verification and final sign-off happen on the integrated main snapshot.
 
 ## 4) Output contract (evidence over claims)
 Always report:
@@ -40,7 +77,7 @@ Always report:
 - Role attribution (who produced / who reviewed / who verified)
 - Verification executed (exact commands + results), or why not runnable
 
-For gate-bearing sub-agents, the standard response sections are:
+For gate-bearing sub-agents, use:
 - Findings
 - Evidence
 - Recommendation

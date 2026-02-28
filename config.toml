@@ -8,8 +8,8 @@ trust_level = "trusted"
 multi_agent = true
 
 [agents]
-max_threads = 10
-max_depth = 2
+max_threads = 20
+max_depth = 1
 
 [agents.default]
 description = "Gatekeeper + 调度者：把门禁变成硬规则，决定是否并行、何时从只读转入可写实现。"
