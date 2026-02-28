@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenClaw 更新工作流"
+  short_description: "本机OpenClaw升级、补丁重打与健康自检流程"
+  default_prompt: "Use $openclaw-update-workflow to run stable mode first, then escalate to full mode only when a real version upgrade is required."
