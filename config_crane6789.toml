@@ -1,0 +1,5 @@
+model = "gpt-5.3-codex"
+model_reasoning_effort = "high"
+personality = "pragmatic"
+[projects."/Users/crane"]
+trust_level = "trusted"

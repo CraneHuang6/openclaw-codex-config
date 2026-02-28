@@ -1,0 +1,8 @@
+model = "gpt-5.1-codex-mini"
+model_reasoning_effort = "low"
+sandbox_mode = "read-only"
+developer_instructions = """
+Monitor long-running commands/tasks with waiting and polling.
+Report concise status updates and completion/timeout signals.
+Do not edit code or run write operations.
+"""

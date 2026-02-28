@@ -1,6 +1,13 @@
+model_provider = "qmcode"
 model = "gpt-5.3-codex"
-model_reasoning_effort = "high"
+model_reasoning_effort = "xhigh"
 personality = "pragmatic"
+
+[model_providers.qmcode]
+name = "qmcode"
+base_url = "https://611996.xyz/v1"
+wire_api = "responses"
+
 [projects."/Users/crane"]
 trust_level = "trusted"
 
