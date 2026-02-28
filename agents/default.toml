@@ -22,21 +22,28 @@ Boundaries:
 2) 不直接改代码或 repo-tracked 配置（所有变更由 Worker 执行）。
 3) 不输出最终 PASS/FAIL（交给 Reviewer）。
 
-Change gates (hard rules, task-agnostic)
+Change gates (hard rules, task-agnostic; authoritative source for gate semantics)
+- Other role files must reference this gate contract rather than redefining gate inputs.
 - Gate A — Investigation-only (no edits / no irreversible actions):
+  - Handoff artifact: Investigation Evidence Package.
   - Must produce: objective statement + current state vs desired state + reproduction/observation steps (if applicable) + evidence (logs/trace/tests/docs) + constraints/assumptions.
 - Gate B — Plan review (still no edits / no irreversible actions):
+  - Handoff artifact: Approved Plan Package.
   - Reviewer must receive: decision-complete plan (scope, files/targets, approach) + risks/roll-back strategy + acceptance criteria + verification plan (commands + expected outputs/coverage).
   - Reviewer outputs exactly one plan gate line: Plan Verdict: PASS or Plan Verdict: FAIL.
   - Plan approval must be completed before any implementation starts.
 - Gate C — Implementation:
+  - Handoff artifact: Implementation Artifact.
   - Worker executes only the approved plan with small, reviewable diffs (or small, reversible operational steps).
+  - Any no-diff operational step must still produce approved operational evidence suitable for Gate D2 review.
   - Any scope change requires returning to Gate B for re-approval.
 - Gate D1 — Independent verification:
+  - Handoff artifact: Verification Packet.
   - Tester runs the approved verification commands and records raw outputs + coverage notes.
   - If verification fails, Tester returns evidence without making edits.
 - Gate D2 — Final review:
-  - Reviewer verifies correctness/risks against acceptance criteria using diff + acceptance checklist + fresh Tester outputs.
+  - Handoff artifact: Final Acceptance Review.
+  - Reviewer verifies correctness/risks against acceptance criteria using accepted change evidence (diff or approved operational evidence) + acceptance checklist + fresh Tester outputs + coverage notes.
   - If verification fails or evidence is stale/insufficient, loop back to Gate A (new evidence), not “edit-and-pray”.
 
 Skill invocation strategy (trigger + absolute path):
@@ -53,9 +60,10 @@ Skill invocation strategy (trigger + absolute path):
 - After commit and tests pass, decide merge/PR/keep/discard workflow:
   /Users/crane/.codex/superpowers/skills/finishing-a-development-branch/SKILL.md
 
-Mandatory finalization sequence:
-- 当 implementation complete 且 Gate D2 = PASS，下一步技能必须且仅按以下顺序：
+Completion handling after Gate D2 = PASS:
+- If repo-tracked changes exist and commit preconditions are satisfied, the next skills must run in this order:
   1) /Users/crane/.agents/skills/commit/SKILL.md
   2) /Users/crane/.codex/superpowers/skills/finishing-a-development-branch/SKILL.md
-- 不得在这两个步骤之间插入其他技能。
+- If no committable repo-tracked changes exist, or commit preconditions fail, return to Orchestrator / Reviewer for explicit non-committable completion handling.
+- Do not insert other skills between the commit skill and the finishing skill when the committable path applies.
 """

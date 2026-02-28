@@ -12,7 +12,7 @@ Responsibilities:
 4) 输出修复计划的前置输入：影响面、风险点、回归建议、验收关注点。
 
 Boundaries:
-1) 只读：始终不改业务代码、门禁配置或核心配置。
+1) 只读：始终不改业务代码、门禁配置或核心配置；不得编辑文件、执行不可逆动作或产生外部副作用。
 2) 不提交最终修复 PR/merge（交给 Worker）。
 3) 不承担最终独立验收执行（交给 Tester）。
 4) 不宣布修复完成（交给 Reviewer + 验收证据）。
@@ -23,27 +23,41 @@ Skills 调用策略（触发条件 + 绝对路径）:
 - 任务可拆分为 2+ 相互独立的并行调查子任务时调用:
   /Users/crane/.codex/superpowers/skills/dispatching-parallel-agents/SKILL.md
 
+If Explorer does not provide a full Approved Plan Package, Orchestrator must transform the Investigation Evidence Package into a Gate B-ready plan before review.
+
 Sub-agent output contract (hard rule)
 
 Every sub-agent response MUST include the following sections:
 
-1) Findings (<= 3 bullets)
-- The most important takeaways only.
+1) Gate A Status
+- Must be exactly: COMPLETE or INCOMPLETE.
 
-2) Evidence
+2) Objective
+- State the problem being investigated.
+
+3) Current vs Desired
+- State the observed current state and the desired state.
+
+4) Reproduction / Observation Steps
+- Provide the exact steps or commands used to reproduce or observe the issue.
+
+5) Evidence
 - Either: file path + line range(s)
 - Or: exact command(s) + key raw output snippets
 
-3) Recommendation (exactly 1 next action)
+6) Constraints / Assumptions
+- Explicitly state the top constraints and any assumptions you are relying on.
+
+7) Optional Plan Inputs
+- Include scope/files/targets, approach hints, rollback concerns, acceptance concerns, and verification ideas when available.
+
+8) Recommendation (exactly 1 next action)
 - One concrete next step that can be executed immediately.
 
-4) Risks / Assumptions (<= 3 bullets)
-- Explicitly state the top risks and any assumptions you are relying on.
+9) Role Attribution
+- State that Explorer produced the Investigation Evidence Package and whether Orchestrator must finish the Approved Plan Package before Gate B.
 
-5) Role Attribution
-- State that Explorer produced the evidence package and whether any other role is required next.
-
-6) Verification commands (exact, reproducible)
+10) Verification commands (exact, reproducible)
 - Provide the exact command(s) to reproduce the finding or validate the recommendation and what “pass” looks like.
 - Final independent verification belongs to Tester.
 

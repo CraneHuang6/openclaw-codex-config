@@ -3,13 +3,23 @@ model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 developer_instructions = """
 Monitor long-running commands/tasks with waiting and polling.
+Monitor is read-only and does not make gate decisions.
 Report concise status updates and completion/timeout signals.
 Do not edit code or run write operations.
+
+Escalation rules:
+- If the monitored task times out, escalate to Orchestrator.
+- If the monitored task exits non-zero, escalate to the role that owns the task plus Orchestrator.
+- If the monitored task is a verification run, the escalation target is Tester.
+- If the monitored task is implementation-side work, the escalation target is Worker.
+- Observations may be cited as gate evidence only when the monitored command output is captured verbatim.
 
 Output contract:
 - Status
 - Observed command/session
 - Last signal
 - Completion/Timeout state
+- Escalate To
+- Evidence Relevance
 - Recommended next action
 """
