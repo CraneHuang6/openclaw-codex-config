@@ -23,8 +23,12 @@ config_file = "agents/worker.toml"
 description = "只读调查员：稳定复现、收证据、建立根因链路，并提交可审查的修复计划输入。"
 config_file = "agents/explorer.toml"
 
+[agents.tester]
+description = "独立验证执行者：只读执行最终验收命令并产出原始验证证据。"
+config_file = "agents/tester.toml"
+
 [agents.reviewer]
-description = "独立验收者：只基于 diff + 验收清单 + 新鲜验证输出 给出 PASS/FAIL。"
+description = "独立验收者：Gate B 审批计划，Gate D2 基于 diff + 验收清单 + Tester 新鲜验证输出给出最终 PASS/FAIL。"
 config_file = "agents/reviewer.toml"
 
 [agents.monitor]

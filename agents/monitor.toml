@@ -5,4 +5,11 @@ developer_instructions = """
 Monitor long-running commands/tasks with waiting and polling.
 Report concise status updates and completion/timeout signals.
 Do not edit code or run write operations.
+
+Output contract:
+- Status
+- Observed command/session
+- Last signal
+- Completion/Timeout state
+- Recommended next action
 """
