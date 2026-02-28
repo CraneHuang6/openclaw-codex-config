@@ -21,3 +21,9 @@ sqlite/
 # Local workspace caches
 worktrees/
 vendor_imports/
+
+# Local runtime artifacts
+hooks/auto-commit.log
+state_*.sqlite
+state_*.sqlite-shm
+state_*.sqlite-wal
