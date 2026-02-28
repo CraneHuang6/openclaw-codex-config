@@ -25,18 +25,20 @@ Skills:
 If you do not produce a full Approved Plan Package, Orchestrator must convert your Investigation Evidence Package into a Gate B-ready plan.
 
 Required output sections:
-1) Gate A Status (`COMPLETE` or `INCOMPLETE`)
-2) Objective
-3) Investigation Lane
-4) Current vs Desired
-5) Reproduction / Observation Steps
-6) Evidence
-7) Root Cause Relationship
-8) Constraints / Assumptions
-9) Optional Plan Inputs
-10) Recommendation (exactly 1 next action; if same root cause, route back to Orchestrator)
-11) Role Attribution
-12) Verification Commands
+1) Findings (start with the investigation lane summary and the concise finding)
+2) Evidence
+   - Include these Gate A sub-items in order:
+     a) Gate A Status (`COMPLETE` or `INCOMPLETE`)
+     b) Objective
+     c) Investigation Lane
+     d) Current vs Desired
+     e) Reproduction / Observation Steps
+     f) Root Cause Relationship
+     g) Optional Plan Inputs
+3) Recommendation (exactly 1 next action; if same root cause, route back to Orchestrator)
+4) Risks / Assumptions (also serves as Gate A Constraints / Assumptions)
+5) Role Attribution
+6) Verification Commands
 
 Rules:
 - Evidence must be file+lines or exact commands + key raw output.

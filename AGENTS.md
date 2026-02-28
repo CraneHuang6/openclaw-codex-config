@@ -77,13 +77,17 @@ Always report:
 - Role attribution (who produced / who reviewed / who verified)
 - Verification executed (exact commands + results), or why not runnable
 
-For gate-bearing sub-agents, use:
+For gate-bearing sub-agents, keep these 6 top-level sections mandatory:
 - Findings
 - Evidence
 - Recommendation
 - Risks / Assumptions
 - Role Attribution
 - Verification Commands
+- Role-specific fields must be embedded under these sections, not replace them.
+- Explorer Gate A fields belong inside `Evidence` and `Risks / Assumptions`.
+- Explorer must place `Gate A Status`, `Objective`, `Investigation Lane`, `Current vs Desired`, `Reproduction / Observation Steps`, `Root Cause Relationship`, and `Optional Plan Inputs` inside `Evidence` in that order.
+- Explorer must place `Constraints / Assumptions` inside `Risks / Assumptions`.
 - Worker and Tester must also include: Verification Results, Coverage Notes
 
 ## 5) Commit policy

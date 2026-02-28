@@ -471,16 +471,3 @@
   first_error_class: none
   result_domain: none
   report: /Users/crane/.openclaw/workspace/outputs/system-updates/2026-02-27-daily-auto-update-210026-29574.md
-- last_run_at: 2026-02-28 21:00:30 CST
-  mode: skip-update
-  result: ok
-  before_version: 2026.2.26
-  after_version: 2026.2.26
-  dns_precheck: skip
-  status_deep: pass
-  gateway_probe: pass
-  security_audit: pass
-  feishu_probe: skip
-  first_error_class: none
-  result_domain: none
-  report: /Users/crane/.openclaw/workspace/outputs/system-updates/2026-02-28-daily-auto-update-210011-71965.md
