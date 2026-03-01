@@ -3,3 +3,44 @@ model_reasoning_effort = "high"
 personality = "pragmatic"
 [projects."/Users/crane"]
 trust_level = "trusted"
+
+[features]
+multi_agent = true
+
+[agents]
+max_threads = 20
+max_depth = 1
+
+[agents.default]
+description = "Gatekeeper + 调度者：把门禁变成硬规则，决定是否并行、何时从只读转入可写实现。"
+config_file = "agents/orchestrator.toml"
+
+[agents.worker]
+description = "最小变更实现者：仅在计划获批后实施最小修复，严格按计划执行并产出可审查的变更与验证输出。"
+config_file = "agents/worker.toml"
+
+[agents.explorer]
+description = "只读调查员：稳定复现、收证据、建立根因链路，并提交可审查的修复计划输入。"
+config_file = "agents/explorer.toml"
+
+[agents.tester]
+description = "独立验证执行者：只读执行最终验收命令并产出原始验证证据。"
+config_file = "agents/tester.toml"
+
+[agents.reviewer]
+description = "独立验收者：Gate B 审批计划，Gate D2 基于 diff + 验收清单 + Tester 新鲜验证输出给出最终 PASS/FAIL。"
+config_file = "agents/reviewer.toml"
+
+[agents.monitor]
+description = "Long-running command/task monitoring role optimized for waiting/polling."
+config_file = "agents/monitor.toml"
+
+[notice]
+hide_full_access_warning = true
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"
+
+[[skills.config]]
+path = "/Users/crane/.codex/superpowers/skills/receiving-code-review/SKILL.md"
+enabled = false

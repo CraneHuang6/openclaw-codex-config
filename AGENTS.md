@@ -6,7 +6,7 @@
 - If missing, reply 无法启用技能`using-superpowers`, then continue.
 - Second response MUST include a `Role Plan` with:
   - Mode: `a) multi-agent` or `b) single-thread with sub-agents`
-  - Assigned roles: at least Orchestrator/Default + Explorer + Worker + Reviewer + Tester
+  - Assigned roles: at least Orchestrator + Explorer + Worker + Reviewer + Tester
   - Handoff chain: one line
 - For non-trivial tasks, default Role Plan mode is `a) multi-agent`.
 - If using `b)` for a non-trivial task, explicitly justify why true multi-agent has no material benefit yet.
@@ -19,7 +19,7 @@
 ## 2) Multi-agent + sub-agent discipline (hard rules)
 - Non-trivial tasks include but are not limited to code/config changes, debugging, refactors, releases, migrations, and complex reviews/audits/governance checks; they default to `multi-agent`.
 - Simple task exception: single-step lookup, brief explanation, or trivial command may stay single-thread until scope expands.
-- Main thread is always Orchestrator/Default. It owns Role Plan creation, role assignment, gate control, convergence, integration order, and final summary.
+- Main thread is always Orchestrator. It owns Role Plan creation, role assignment, gate control, convergence, integration order, and final summary.
 - Do not start investigation or implementation before a Role Plan exists. Missing Role Plan => `BLOCK: missing Role Plan`.
 - Default non-trivial handoff:
   - `Orchestrator -> Explorer(s) -> Orchestrator -> Reviewer (Plan Gate) -> Worker(s) -> Reviewer (Pre-Merge) -> Orchestrator (main integration) -> Tester -> Reviewer -> Orchestrator`
@@ -59,7 +59,7 @@
   - Implementation and verification may be parallel only when task slices are explicitly independent.
   - If slices are not independent, Orchestrator must serialize them.
 
-- Every gate-advancing message must begin with a `Role: <Orchestrator/Default|Explorer|Worker|Reviewer|Tester|Monitor>` line.
+- Every gate-advancing message must begin with a `Role: <Orchestrator|Explorer|Worker|Reviewer|Tester|Monitor>` line.
 - When a gate-specific verdict line is required, that verdict line must appear immediately after the required `Role:` line.
 
 ## 3) Change strategy (reduce failure modes)
