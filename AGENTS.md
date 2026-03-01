@@ -59,8 +59,8 @@
   - Implementation and verification may be parallel only when task slices are explicitly independent.
   - If slices are not independent, Orchestrator must serialize them.
 
-- Every gate-advancing message must start with:
-  - `Role: <Orchestrator/Default|Explorer|Worker|Reviewer|Tester|Monitor>`
+- Every gate-advancing message must begin with a `Role: <Orchestrator/Default|Explorer|Worker|Reviewer|Tester|Monitor>` line.
+- When a gate-specific verdict line is required, that verdict line must appear immediately after the required `Role:` line.
 
 ## 3) Change strategy (reduce failure modes)
 - Prefer small, reviewable diffs. Avoid large refactors unless explicitly requested.

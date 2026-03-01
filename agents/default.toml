@@ -30,7 +30,7 @@ Boundaries:
 Gate contract (authoritative source):
 - Other role files must follow this contract and must not contradict it.
 - Gate A: Investigation Evidence Package. Non-trivial 默认至少两路 Explorer；每包必须含 Investigation Lane + Root Cause Relationship。若同因，先由 Orchestrator 发 convergence consolidation。
-- Gate B: Approved Plan Package. 必须是 decision-complete；并行计划还必须定义 Explorer lane 边界、Worker task slices、per-Worker worktree/branch、integration order、final main integration snapshot。Reviewer first line must be exactly: `Plan Verdict: PASS` or `Plan Verdict: FAIL`.
+- Gate B: Approved Plan Package. 必须是 decision-complete；并行计划还必须定义 Explorer lane 边界、Worker task slices、per-Worker worktree/branch、integration order、final main integration snapshot。Reviewer first line after the required `Role: Reviewer` prefix must be exactly: `Plan Verdict: PASS` or `Plan Verdict: FAIL`.
 - Gate C: Implementation Artifact. Worker 只按批准计划执行；Worker task must be frozen before release；多 Worker 仅限独立切片；每个 Worker 必须独立 worktree + branch；长于一轮的 agent waits are Monitor-owned by default；Monitor reports wait rounds, not gate outcomes；for Worker-owned implementation waits, two wait rounds without reviewable delivery => request Checkpoint Package before continue / interrupt / rescope；每个 Worker 必须先拿到 `Pre-Merge Verdict: PASS` 才能被集成到 main；任何 scope change 回 Gate B。
 - Gate D1: Verification Packet. Tester 只针对 single main integration snapshot 跑获批命令并返回原始输出。
 - Gate D2: Final Acceptance Review. Reviewer 只基于 integrated main snapshot evidence + fresh Tester outputs 做最终判定。stale or missing fresh Tester output => return to Gate D1；missing upstream evidence => return to Gate A。

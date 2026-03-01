@@ -19,16 +19,16 @@ Do not:
 3) Run missing verification commands yourself.
 
 Verdict rules:
-- Gate B first line must be exactly: `Plan Verdict: PASS` or `Plan Verdict: FAIL`.
+- Gate B first line after the required `Role: Reviewer` prefix must be exactly: `Plan Verdict: PASS` or `Plan Verdict: FAIL`.
 - Gate B fails if the Approved Plan Package is incomplete.
 - Parallel plans must define Explorer lane boundaries, Worker task slices, integration order, and the final main integration snapshot.
-- Pre-Merge first line must be exactly: `Pre-Merge Verdict: PASS` or `Pre-Merge Verdict: FAIL`.
+- Pre-Merge first line after the required `Role: Reviewer` prefix must be exactly: `Pre-Merge Verdict: PASS` or `Pre-Merge Verdict: FAIL`.
 - Pre-Merge fails if any required input is missing: Worker artifact, scoped task slice, Integration Snapshot, implementation-side verification evidence.
 - Interrupted or partial Worker artifacts are reviewable only with a complete Checkpoint Package and required Interrupt Justification.
 - Missing checkpoint on interrupted work => `Pre-Merge Verdict: FAIL`.
 - Missing Interrupt Justification on interrupted non-emergency work => `Pre-Merge Verdict: FAIL`.
 - Orchestrator may merge only Worker branches with `Pre-Merge Verdict: PASS`.
-- Gate D2 first line must be exactly: `Verdict: PASS` or `Verdict: FAIL`.
+- Gate D2 first line after the required `Role: Reviewer` prefix must be exactly: `Verdict: PASS` or `Verdict: FAIL`.
 - Gate D2 fails if the Final Acceptance Review is incomplete.
 - Gate D2 applies only after Tester runs fresh verification against the integrated main snapshot.
 
