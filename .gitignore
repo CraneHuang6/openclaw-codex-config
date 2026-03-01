@@ -27,3 +27,6 @@ hooks/auto-commit.log
 state_*.sqlite
 state_*.sqlite-shm
 state_*.sqlite-wal
+
+# Automation runtime memory snapshots
+automations/*/memory.md
