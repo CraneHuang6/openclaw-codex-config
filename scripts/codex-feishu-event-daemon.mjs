@@ -13,6 +13,8 @@ const PRECHECK_TARGET = process.env.CODEX_FEISHU_TARGET || "ou_9911a4b1244b09203
 const DEDUPE_TTL_SECONDS = 6 * 3600;
 const POLL_MS = Number(process.env.CODEX_NOTIFY_POLL_MS || "2000");
 const COMPLETION_QUIET_MS = Number(process.env.CODEX_NOTIFY_COMPLETION_QUIET_MS || "20000");
+const META_SCAN_CHUNK_BYTES = Number(process.env.CODEX_NOTIFY_META_SCAN_CHUNK_BYTES || "8192");
+const META_SCAN_MAX_BYTES = Number(process.env.CODEX_NOTIFY_META_SCAN_MAX_BYTES || "1048576");
 const READ_HISTORY = process.env.CODEX_NOTIFY_READ_HISTORY === "1";
 const LOCK_DIR = `${STATE_FILE}.lock`;
 const FEISHU_INBOUND_PATTERNS = [
@@ -312,6 +314,102 @@ function isFeishuInboundNotifyPayload(payload) {
   return inputMessages.some((m) => isFeishuInboundText(m));
 }
 
+function applySessionMetaToState(state, payload) {
+  if (!payload || typeof payload !== "object") return false;
+
+  if (payload.id) state.threadId = payload.id;
+  if (payload.cwd && !state.cwd) state.cwd = payload.cwd;
+
+  const spawn = payload.source?.subagent?.thread_spawn;
+  if (spawn && typeof spawn === "object") {
+    state.isSubagent = true;
+    state.parentThreadId = spawn.parent_thread_id || "";
+    const depth = Number(spawn.depth);
+    state.spawnDepth = Number.isFinite(depth) ? depth : null;
+  } else {
+    state.isSubagent = false;
+    state.parentThreadId = "";
+    state.spawnDepth = null;
+  }
+
+  state.metaHydrated = true;
+  return true;
+}
+
+async function hydrateRolloutMeta(filePath, entrySize, state, options = {}) {
+  const force = options.force === true;
+  if (state.metaHydrated && !force) return;
+
+  let fd;
+  try {
+    fd = await fs.open(filePath, "r");
+    let size = entrySize;
+    if (typeof size !== "number") {
+      const st = await fd.stat();
+      size = st.size;
+    }
+
+    const chunkBytes = Math.max(1, META_SCAN_CHUNK_BYTES);
+    const maxBytes = Math.max(1, META_SCAN_MAX_BYTES);
+    const scanLimit = Math.min(size, maxBytes);
+    if (scanLimit <= 0) {
+      state.metaHydrated = true;
+      return;
+    }
+
+    let offset = 0;
+    let bytesScanned = 0;
+    let remainder = "";
+
+    while (offset < size && bytesScanned < scanLimit) {
+      const toRead = Math.min(chunkBytes, scanLimit - bytesScanned);
+      if (toRead <= 0) break;
+
+      const buf = Buffer.alloc(toRead);
+      const readRes = await fd.read(buf, 0, toRead, offset);
+      const bytesRead = readRes?.bytesRead || 0;
+      if (bytesRead <= 0) break;
+
+      offset += bytesRead;
+      bytesScanned += bytesRead;
+      remainder += buf.toString("utf8", 0, bytesRead);
+
+      const lines = remainder.split("\n");
+      remainder = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let obj;
+        try {
+          obj = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (obj.type !== "session_meta") continue;
+        applySessionMetaToState(state, obj.payload);
+        return;
+      }
+    }
+
+    state.metaHydrated = true;
+    if (!state.metaScanIncompleteLogged) {
+      state.metaScanIncompleteLogged = true;
+      await log("WARN", `meta_scan_incomplete thread=${state.threadId || "-"} file=${path.basename(filePath)} bytes_scanned=${bytesScanned}`);
+    }
+  } catch (err) {
+    state.metaHydrated = true;
+    await log("WARN", `hydrate session_meta failed file=${path.basename(filePath)} err=${truncateSummary(err?.message || err)}`);
+  } finally {
+    if (fd) {
+      try {
+        await fd.close();
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
 function fromRolloutEvent(payload, threadId, cwd) {
   const t = payload?.type;
   if (!t) return null;
@@ -495,7 +593,15 @@ async function processRolloutFile(entry) {
     cwd: "",
     feishuInbound: false,
     feishuInboundLogged: false,
+    isSubagent: null,
+    parentThreadId: "",
+    spawnDepth: null,
+    metaHydrated: false,
+    metaUnknownLogged: false,
+    metaScanIncompleteLogged: false,
   };
+
+  await hydrateRolloutMeta(entry.path, entry.size, s);
 
   if (entry.size < s.offset) {
     s.offset = 0;
@@ -541,6 +647,11 @@ async function processRolloutFile(entry) {
         continue;
       }
 
+      if (obj.type === "session_meta") {
+        applySessionMetaToState(s, obj.payload);
+        continue;
+      }
+
       if (obj.type === "response_item") {
         const n = fromRolloutResponseItem(obj.payload, s.threadId, s.turnId, s.cwd);
         if (!n) continue;
@@ -552,9 +663,26 @@ async function processRolloutFile(entry) {
       const n = fromRolloutEvent(obj.payload, s.threadId, s.cwd);
       if (!n) continue;
 
-      if (n.kind === "task_complete" && s.feishuInbound) {
-        await log("INFO", `skip task_complete for feishu inbound thread=${s.threadId} turn=${n.turnId || "-"}`);
-        continue;
+      if (n.kind === "task_complete") {
+        if (s.isSubagent === null) {
+          await log("INFO", `meta_hydrate_retry_on_task_complete thread=${s.threadId} file=${path.basename(entry.path)}`);
+          await hydrateRolloutMeta(entry.path, entry.size, s, { force: true });
+        }
+
+        if (s.isSubagent === true) {
+          await log("INFO", `skip task_complete for subagent thread=${s.threadId} parent=${s.parentThreadId || "-"} depth=${s.spawnDepth ?? "-"}`);
+          continue;
+        }
+
+        if (s.isSubagent !== false && !s.metaUnknownLogged) {
+          s.metaUnknownLogged = true;
+          await log("WARN", `task_complete meta_unknown thread=${s.threadId} file=${path.basename(entry.path)} default=main-thread`);
+        }
+
+        if (s.feishuInbound) {
+          await log("INFO", `skip task_complete for feishu inbound thread=${s.threadId} turn=${n.turnId || "-"}`);
+          continue;
+        }
       }
 
       await routeNotification(n, "rollout-event_msg");
