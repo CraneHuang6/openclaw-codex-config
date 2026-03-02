@@ -12,6 +12,7 @@ const LOG_FILE = process.env.CODEX_NOTIFY_LOG_FILE || path.join(process.env.HOME
 const PRECHECK_TARGET = process.env.CODEX_FEISHU_TARGET || "ou_9911a4b1244b09203d2ea79f5cef2bee";
 const DEDUPE_TTL_SECONDS = 6 * 3600;
 const POLL_MS = Number(process.env.CODEX_NOTIFY_POLL_MS || "2000");
+const COMPLETION_QUIET_MS = Number(process.env.CODEX_NOTIFY_COMPLETION_QUIET_MS || "20000");
 const READ_HISTORY = process.env.CODEX_NOTIFY_READ_HISTORY === "1";
 const LOCK_DIR = `${STATE_FILE}.lock`;
 const FEISHU_INBOUND_PATTERNS = [
@@ -20,6 +21,7 @@ const FEISHU_INBOUND_PATTERNS = [
 ];
 
 const fileState = new Map();
+const pendingCompletions = new Map();
 
 function nowSeconds() {
   return Math.floor(Date.now() / 1000);
@@ -212,6 +214,38 @@ async function sendNotification(n) {
   await log("INFO", `sent key=${n.dedupeKey} title=${n.title}`);
 }
 
+function queueCompletionNotification(n) {
+  const threadId = n.threadId || "-";
+  pendingCompletions.set(threadId, {
+    threadId,
+    turnId: n.turnId || "-",
+    eventType: n.eventType || "task_complete",
+    cwd: n.cwd || "",
+    summary: n.summary || "",
+    seenAtMs: Date.now(),
+    notification: n,
+  });
+}
+
+async function flushPendingCompletions(force = false) {
+  const nowMs = Date.now();
+  for (const [threadId, candidate] of pendingCompletions.entries()) {
+    if (!force && nowMs - candidate.seenAtMs < COMPLETION_QUIET_MS) continue;
+    await sendNotification(candidate.notification);
+    pendingCompletions.delete(threadId);
+  }
+}
+
+async function routeNotification(n, source) {
+  if (!n) return;
+  if (n.kind === "task_complete") {
+    queueCompletionNotification(n);
+    await log("INFO", `queue completion source=${source} thread=${n.threadId || "-"} turn=${n.turnId || "-"}`);
+    return;
+  }
+  await sendNotification(n);
+}
+
 function normalizeKind(kind, eventType, threadId, turnId, callId, cwd, summary) {
   if (!threadId) threadId = "-";
   if (!turnId) turnId = "-";
@@ -234,6 +268,7 @@ function normalizeKind(kind, eventType, threadId, turnId, callId, cwd, summary) 
 
   return {
     kind,
+    eventType,
     title,
     dedupeKey,
     threadId,
@@ -305,6 +340,36 @@ function fromRolloutEvent(payload, threadId, cwd) {
   }
 
   return null;
+}
+
+function fromRolloutResponseItem(payload, threadId, turnId, cwd) {
+  if (!payload || payload.type !== "function_call") return null;
+  if (payload.name !== "request_user_input") return null;
+
+  let args = {};
+  if (typeof payload.arguments === "string" && payload.arguments.trim()) {
+    try {
+      args = JSON.parse(payload.arguments);
+    } catch {
+      args = {};
+    }
+  } else if (payload.arguments && typeof payload.arguments === "object") {
+    args = payload.arguments;
+  }
+
+  const firstQ = Array.isArray(args.questions) && args.questions.length > 0
+    ? args.questions.map((q) => q?.question || "").filter(Boolean).join(" / ")
+    : "request_user_input";
+
+  return normalizeKind(
+    "user_input",
+    "request_user_input",
+    threadId,
+    turnId,
+    payload.call_id,
+    cwd,
+    firstQ,
+  );
 }
 
 function fromNotifyPayload(payload) {
@@ -426,6 +491,7 @@ async function processRolloutFile(entry) {
     offset: READ_HISTORY ? 0 : entry.size,
     remainder: "",
     threadId: parseThreadIdFromPath(entry.path),
+    turnId: "",
     cwd: "",
     feishuInbound: false,
     feishuInboundLogged: false,
@@ -470,7 +536,15 @@ async function processRolloutFile(entry) {
       }
 
       if (obj.type === "turn_context") {
+        if (obj.payload?.turn_id) s.turnId = obj.payload.turn_id;
         if (obj.payload?.cwd) s.cwd = obj.payload.cwd;
+        continue;
+      }
+
+      if (obj.type === "response_item") {
+        const n = fromRolloutResponseItem(obj.payload, s.threadId, s.turnId, s.cwd);
+        if (!n) continue;
+        await routeNotification(n, "rollout-response_item");
         continue;
       }
 
@@ -483,7 +557,7 @@ async function processRolloutFile(entry) {
         continue;
       }
 
-      await sendNotification(n);
+      await routeNotification(n, "rollout-event_msg");
     }
   } finally {
     await fd.close();
@@ -512,6 +586,7 @@ async function runRolloutMode() {
       if (!keep.has(k)) fileState.delete(k);
     }
 
+    await flushPendingCompletions(false);
     await sleep(POLL_MS);
   }
 }
@@ -525,19 +600,28 @@ async function runAppserverMode() {
 
   await log("INFO", "appserver mode started (reading JSON lines from stdin)");
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  const flushTimer = setInterval(() => {
+    void flushPendingCompletions(false);
+  }, Math.min(Math.max(POLL_MS, 500), 2000));
+  flushTimer.unref?.();
 
-  for await (const line of rl) {
-    if (!line.trim()) continue;
-    let obj;
-    try {
-      obj = JSON.parse(line);
-    } catch {
-      continue;
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const n = fromAppserverMessage(obj);
+      if (!n) continue;
+      await routeNotification(n, "appserver");
     }
-
-    const n = fromAppserverMessage(obj);
-    if (!n) continue;
-    await sendNotification(n);
+  } finally {
+    clearInterval(flushTimer);
+    await flushPendingCompletions(true);
   }
 }
 
@@ -558,8 +642,8 @@ async function runNotifyMode() {
 
   const n = fromNotifyPayload(payload);
   if (!n) return;
-  if (n.kind === "task_complete" && isFeishuInboundNotifyPayload(payload)) {
-    await log("INFO", `skip notify task_complete for feishu inbound thread=${n.threadId || "-"}`);
+  if (n.kind === "task_complete") {
+    await log("INFO", `notify completion ignored; rollout aggregator authoritative thread=${n.threadId || "-"} turn=${n.turnId || "-"}`);
     return;
   }
   await sendNotification(n);
