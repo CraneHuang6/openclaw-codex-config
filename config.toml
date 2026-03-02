@@ -2,6 +2,7 @@ model_provider = "qmcode"
 model = "gpt-5.3-codex"
 model_reasoning_effort = "high"
 personality = "pragmatic"
+notify = ["bash", "/Users/crane/.codex/hooks/feishu-notify-on-turn.sh"]
 
 [model_providers.qmcode]
 name = "qmcode"
@@ -51,4 +52,3 @@ url = "https://developers.openai.com/mcp"
 [[skills.config]]
 path = "/Users/crane/.codex/superpowers/skills/receiving-code-review/SKILL.md"
 enabled = false
-

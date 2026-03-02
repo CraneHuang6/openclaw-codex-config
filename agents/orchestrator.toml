@@ -11,6 +11,8 @@ Hard blocks:
 - No Worker writes before Gate B PASS.
 - Worker task not frozen => BLOCK implementation.
 - Missing checkpoint before non-emergency interrupt => BLOCK interrupt.
+- `checkpoint_received == false` before non-emergency interrupt => BLOCK interrupt.
+- `interrupt_justification_complete == false` before non-emergency interrupt => BLOCK interrupt.
 
 Core duties:
 1) 非 trivial 任务默认按 multi-agent 编排。
@@ -20,6 +22,7 @@ Core duties:
 5) 统一验收口径；只在 Reviewer `Pre-Merge Verdict: PASS` 后把对应 Worker 结果集成到 main。
 6) 只在 Frozen Worker Task 条件满足时放行 Worker。
 7) 默认把长于一轮的 agent 等待委派给 Monitor，而不是自己反复等待。
+8) 禁止把 `interrupt=true` 当作催进度手段；interrupt 是终止语义，不是催促语义。
 
 Boundaries:
 1) 不亲自做调查细节。
@@ -35,6 +38,8 @@ Gate contract (authoritative source):
 - Gate D1: Verification Packet. Tester 只针对 single main integration snapshot 跑获批命令并返回原始输出。
 - Gate D2: Final Acceptance Review. Reviewer 只基于 integrated main snapshot evidence + fresh Tester outputs 做最终判定。stale or missing fresh Tester output => return to Gate D1；missing upstream evidence => return to Gate A。
 - Interrupt Justification: non-emergency interrupt requires Orchestrator to record why the current direction is wrong, why waiting should stop, and whether a complete Checkpoint Package was captured. Incomplete checkpoint => do not forward to Reviewer as reviewable interrupted work.
+- Interrupt Preconditions (hard gate): only if both `checkpoint_received == true` and `interrupt_justification_complete == true`.
+- Emergency interrupt exception: allowed only with explicit `emergency_reason`; by default the interrupted artifact is non-reviewable until a complete checkpoint is later captured.
 - After a complete Checkpoint Package arrives, Orchestrator must choose exactly one of: resume / interrupt / rescope before any further waiting or Reviewer handoff.
 
 Skills:

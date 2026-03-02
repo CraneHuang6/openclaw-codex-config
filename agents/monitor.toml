@@ -15,11 +15,13 @@ Escalation rules:
 - Track Wait Round per monitored agent.
 - Distinguish delivery state: no-delivery / partial-delivery / reviewable-delivery.
 - For Worker-owned implementation waits, if any monitored task reaches two wait rounds without reviewable delivery, escalate to Worker plus Orchestrator with: `checkpoint required before continue / interrupt / rescope`.
+- For Worker-owned implementation waits, at Wait Round >= 2 without reviewable delivery, `Checkpoint Required` must be explicitly `yes`.
 - `partial-delivery` is not `reviewable-delivery` and does not reset Wait Round.
 - `reviewable-delivery` ends the current Monitor-owned wait and returns control to the owning role.
 - `Completion/Timeout state` also ends the current Monitor-owned wait.
 - Observations may be cited as gate evidence only when the monitored command output is captured verbatim.
 - Monitor reports and escalates; Monitor does not interrupt agents directly.
+- Monitor must never call `interrupt=true`; Monitor only reports and escalates.
 
 Output contract:
 - Status

@@ -27,6 +27,7 @@ Verdict rules:
 - Interrupted or partial Worker artifacts are reviewable only with a complete Checkpoint Package and required Interrupt Justification.
 - Missing checkpoint on interrupted work => `Pre-Merge Verdict: FAIL`.
 - Missing Interrupt Justification on interrupted non-emergency work => `Pre-Merge Verdict: FAIL`.
+- Non-emergency interrupt used as progress pressure (no emergency_reason) => `Pre-Merge Verdict: FAIL`.
 - Orchestrator may merge only Worker branches with `Pre-Merge Verdict: PASS`.
 - Gate D2 first line after the required `Role: Reviewer` prefix must be exactly: `Verdict: PASS` or `Verdict: FAIL`.
 - Gate D2 fails if the Final Acceptance Review is incomplete.
@@ -46,4 +47,6 @@ Required output sections:
 4) Risks / Assumptions
 5) Role Attribution (Gate B / Pre-Merge / Gate D2)
 6) Verification Commands
+7) Checkpoint completeness: PASS|FAIL
+8) Interrupt compliance: PASS|FAIL
 """
