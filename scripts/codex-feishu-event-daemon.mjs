@@ -14,6 +14,10 @@ const DEDUPE_TTL_SECONDS = 6 * 3600;
 const POLL_MS = Number(process.env.CODEX_NOTIFY_POLL_MS || "2000");
 const READ_HISTORY = process.env.CODEX_NOTIFY_READ_HISTORY === "1";
 const LOCK_DIR = `${STATE_FILE}.lock`;
+const FEISHU_INBOUND_PATTERNS = [
+  /Feishu\[[^\]]+\]\s*DM\s+from/i,
+  /System:\s*\[[^\]]+\]\s*Feishu\[[^\]]+\]/i,
+];
 
 const fileState = new Map();
 
@@ -245,6 +249,34 @@ function parseThreadIdFromPath(filePath) {
   return m ? m[1] : "-";
 }
 
+function isFeishuInboundText(raw) {
+  if (!raw) return false;
+  const text = String(raw);
+  return FEISHU_INBOUND_PATTERNS.some((re) => re.test(text));
+}
+
+function isFeishuInboundRolloutLine(obj) {
+  if (!obj || typeof obj !== "object") return false;
+
+  if (obj.type === "event_msg" && obj.payload?.type === "user_message") {
+    return isFeishuInboundText(obj.payload?.message);
+  }
+
+  if (obj.type === "response_item" && obj.payload?.type === "message" && obj.payload?.role === "user") {
+    const content = Array.isArray(obj.payload?.content) ? obj.payload.content : [];
+    return content.some((c) => isFeishuInboundText(c?.text));
+  }
+
+  return false;
+}
+
+function isFeishuInboundNotifyPayload(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  if (isFeishuInboundText(payload["last-assistant-message"])) return true;
+  const inputMessages = Array.isArray(payload["input-messages"]) ? payload["input-messages"] : [];
+  return inputMessages.some((m) => isFeishuInboundText(m));
+}
+
 function fromRolloutEvent(payload, threadId, cwd) {
   const t = payload?.type;
   if (!t) return null;
@@ -395,6 +427,8 @@ async function processRolloutFile(entry) {
     remainder: "",
     threadId: parseThreadIdFromPath(entry.path),
     cwd: "",
+    feishuInbound: false,
+    feishuInboundLogged: false,
   };
 
   if (entry.size < s.offset) {
@@ -427,6 +461,14 @@ async function processRolloutFile(entry) {
         continue;
       }
 
+      if (isFeishuInboundRolloutLine(obj)) {
+        s.feishuInbound = true;
+        if (!s.feishuInboundLogged) {
+          s.feishuInboundLogged = true;
+          await log("INFO", `mark feishu inbound thread=${s.threadId} file=${path.basename(entry.path)}`);
+        }
+      }
+
       if (obj.type === "turn_context") {
         if (obj.payload?.cwd) s.cwd = obj.payload.cwd;
         continue;
@@ -435,6 +477,12 @@ async function processRolloutFile(entry) {
       if (obj.type !== "event_msg") continue;
       const n = fromRolloutEvent(obj.payload, s.threadId, s.cwd);
       if (!n) continue;
+
+      if (n.kind === "task_complete" && s.feishuInbound) {
+        await log("INFO", `skip task_complete for feishu inbound thread=${s.threadId} turn=${n.turnId || "-"}`);
+        continue;
+      }
+
       await sendNotification(n);
     }
   } finally {
@@ -510,6 +558,10 @@ async function runNotifyMode() {
 
   const n = fromNotifyPayload(payload);
   if (!n) return;
+  if (n.kind === "task_complete" && isFeishuInboundNotifyPayload(payload)) {
+    await log("INFO", `skip notify task_complete for feishu inbound thread=${n.threadId || "-"}`);
+    return;
+  }
   await sendNotification(n);
 }
 
