@@ -10,6 +10,10 @@ const DURATION_HELPER_MARKER = "function probeDurationMsWithFfprobe(filePath: st
 const HELPER_INSERT_ANCHOR = `/**
  * Upload and send media (image or file) from URL, local path, or buffer
  */`;
+const HELPER_INSERT_ANCHOR_WITH_PERIOD = `/**
+ * Upload and send media (image or file) from URL, local path, or buffer.
+ */`;
+const HELPER_INSERT_ANCHOR_FUNCTION_SIGNATURE = "export async function sendMediaFeishu(";
 const DURATION_HELPER_INSERT_ANCHOR = "function isPathUnderRoot(candidate: string, root: string): boolean {";
 const LOAD_CALL_OLD = "const loaded = await getFeishuRuntime().media.loadWebMedia(mediaUrl, {";
 const LOAD_CALL_NEW = `const normalizedMediaUrl = resolveFeishuMediaUrlForLoad(mediaUrl);
@@ -224,13 +228,27 @@ export function patchFeishuMediaPathSource(source) {
   }
 
   const helperIndex = updated.indexOf(HELPER_MARKER);
-  const anchorIndex = updated.indexOf(HELPER_INSERT_ANCHOR);
+  const helperAnchorCandidates = [
+    HELPER_INSERT_ANCHOR,
+    HELPER_INSERT_ANCHOR_WITH_PERIOD,
+    HELPER_INSERT_ANCHOR_FUNCTION_SIGNATURE,
+  ];
+  let helperAnchor = "";
+  let anchorIndex = -1;
+  for (const anchorCandidate of helperAnchorCandidates) {
+    const candidateIndex = updated.indexOf(anchorCandidate);
+    if (candidateIndex !== -1) {
+      helperAnchor = anchorCandidate;
+      anchorIndex = candidateIndex;
+      break;
+    }
+  }
   if (anchorIndex === -1) {
     throw new Error("helper anchor not found");
   }
 
   if (helperIndex === -1) {
-    updated = updated.replace(HELPER_INSERT_ANCHOR, `${HELPER_FUNCTION}\n\n${HELPER_INSERT_ANCHOR}`);
+    updated = updated.replace(helperAnchor, `${HELPER_FUNCTION}\n\n${helperAnchor}`);
   } else if (helperIndex < anchorIndex) {
     let replaceStart = helperIndex;
     const pathHelperIndex = updated.lastIndexOf(PATH_HELPER_MARKER, helperIndex);

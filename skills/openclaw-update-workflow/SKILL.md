@@ -103,6 +103,17 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 - 摘要字段包含：`mode/result`、版本前后、`dns_precheck`、`status_deep`、`gateway_probe`、`security_audit`、`feishu_probe`、`first_error_class`、`result_domain`。
 - 目的：沉淀“这次自动化真实发生了什么”，避免下次重复误判为功能 bug。
 
+## 2026.3.1 经验沉淀（monitor/helper anchor）
+
+- `monitor` 不是纯只读巡检：会执行统一补丁链（`--skip-update --no-restart`），所以补丁锚点漂移会在 `monitor` 暴露。
+- `helper anchor not found` 的典型根因：`media.ts` 注释锚点文本漂移（例如句号/说明行变化）导致单锚点匹配失效。
+- 快速判定命令（先 A 再 B）：
+  - A: `bash /Users/crane/.openclaw/scripts/repatch-openclaw-feishu-media-path.sh --dry-run`
+  - B: `bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh monitor`
+- 固定验收口径：
+  - A 输出不包含 `helper anchor not found`
+  - B 输出包含 `STATUS=ok`
+
 ## Feishu Media Quick Fix
 
 当出现“文本能发、语音/附件看不到”时，按这个最短链路处理：

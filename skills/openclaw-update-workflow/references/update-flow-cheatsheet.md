@@ -163,6 +163,20 @@ rg -n 'uploadDurationCandidates|msgTypeCandidates: Array<"audio" \| "media" \| "
 
 建议：业务侧仍优先使用 `MEDIA:./workspace/...`；`/tmp` 桥接用于兜底与兼容。若报 `voice fallback send failed`（Feishu 400），优先确认已命中上述重试 marker。
 
+## monitor 报 `helper anchor not found` 快速处理
+
+```bash
+# 1) 先确认 media-path 补丁是否还能命中锚点
+bash /Users/crane/.openclaw/scripts/repatch-openclaw-feishu-media-path.sh --dry-run
+
+# 2) 再跑 monitor 验证整链
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh monitor
+
+# 3) 验收口径
+# A: 输出中无 "helper anchor not found"
+# B: monitor 最终为 "STATUS=ok"
+```
+
 ## Feishu 能收到消息但无回复（Mac App 正常）排障
 
 ```bash
