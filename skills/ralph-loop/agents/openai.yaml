@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ralph Loop"
+  short_description: "依赖感知并行任务循环编排与恢复"
+  default_prompt: "Use $ralph-loop to orchestrate a dependency-aware parallel task loop with strict superpowers gates."
