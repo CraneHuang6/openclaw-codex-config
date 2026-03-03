@@ -343,6 +343,18 @@ function shouldProtectReviewMemory(job, message) {
   return /(memory\\/YYYY-MM-DD\\.md|每日复盘|复盘日记)/i.test(combined);
 }
 
+function shouldProtectDailySingleton(job, message) {
+  if (shouldProtectReviewMemory(job, message)) return true;
+  const jobId = typeof job?.id === "string" ? job.id.trim() : "";
+  if (!jobId) return false;
+  return jobId === "fb1707cc-ed1b-431e-9dc7-5348a60a27a5";
+}
+
+function shouldBypassDuplicateDayGuard(job) {
+  if (process?.env?.OPENCLAW_CRON_ALLOW_DUPLICATE_DAY === "1") return true;
+  return job?.__openclawAllowDuplicateDay === true;
+}
+
 function snapshotReviewMemoryBeforeRun(params) {
   if (!params?.shouldProtect) return null;
   const workspaceDir = typeof params.workspaceDir === "string" ? params.workspaceDir.trim() : "";
@@ -443,6 +455,8 @@ function restoreMemoryAndArchiveConflict(ctx, opts = {}) {
     "function buildCronDayKey(jobId, tz, runAtMs)",
     "async function shouldSkipDuplicateDay(runLogFile, dayKey, opts = {})",
     "async function readCronRunLogEntriesCompat(runLogFile, opts = {})",
+    "function shouldProtectDailySingleton(job, message)",
+    "function shouldBypassDuplicateDayGuard(job)",
     "function snapshotReviewMemoryBeforeRun(params)",
     "function restoreMemoryAndArchiveConflict(ctx, opts = {})",
   ];
@@ -458,7 +472,7 @@ function restoreMemoryAndArchiveConflict(ctx, opts = {}) {
   const guardReturnPattern =
     /if\s*\(\s*cronOutcome\.status\s*===\s*"error"\s*\)\s*(?:\{\s*)?return\s+withRunSession\s*\(\s*\{/m;
   const preRunGuardPattern =
-    /const\s+reviewMemoryEnabled\s*=\s*shouldProtectReviewMemory\(params\.job,\s*params\.message\);/m;
+    /const\s+(?:reviewMemoryEnabled|dailySingletonEnabled)\s*=\s*(?:shouldProtectReviewMemory|shouldProtectDailySingleton)\(params\.job,\s*params\.message\);/m;
   const stateDedupePattern = /params\.job\?\.state\?\.lastStatus/m;
   const postRunGuardPattern =
     /const\s+reviewMemoryAfter\s*=\s*inspectReviewMemoryAfterRun\(reviewMemoryCtx\);/m;
@@ -491,11 +505,33 @@ function restoreMemoryAndArchiveConflict(ctx, opts = {}) {
     "shouldSkipDuplicateDay",
     "readCronRunLogEntriesCompat",
     "shouldProtectReviewMemory",
+    "shouldProtectDailySingleton",
+    "shouldBypassDuplicateDayGuard",
     "snapshotReviewMemoryBeforeRun",
     "inspectReviewMemoryAfterRun",
     "toConflictFileStem",
     "restoreMemoryAndArchiveConflict",
   ]);
+
+  updated = updated.replace(
+    /const\s+reviewMemoryEnabled\s*=\s*shouldProtectReviewMemory\(params\.job,\s*params\.message\);/m,
+    `const reviewMemoryProtectionEnabled = shouldProtectReviewMemory(params.job, params.message);
+const dailySingletonEnabled = shouldProtectDailySingleton(params.job, params.message);
+const bypassDuplicateDayGuard = shouldBypassDuplicateDayGuard(params.job);`
+  );
+  updated = updated.replace(
+    /shouldProtect:\s*reviewMemoryEnabled/m,
+    "shouldProtect: reviewMemoryProtectionEnabled"
+  );
+  updated = updated.replace(
+    /reviewMemoryEnabled\s*&&/g,
+    "dailySingletonEnabled &&\n  !bypassDuplicateDayGuard &&"
+  );
+  updated = updated.replace(
+    /const\s+bypassDuplicateDayGuard\s*=\s*shouldBypassDuplicateDayGuard\(\s*\);/g,
+    "const bypassDuplicateDayGuard = shouldBypassDuplicateDayGuard(params.job);"
+  );
+  updated = updated.replace(/skip duplicate daily review run:/g, "skip duplicate daily run:");
 
   const hasGuardAssignment = guardAssignmentPattern.test(updated);
   const hasGuardReturn = guardReturnPattern.test(updated);
@@ -530,13 +566,15 @@ function restoreMemoryAndArchiveConflict(ctx, opts = {}) {
     }
   }
 
-  const dedupeGuard = `const reviewMemoryEnabled = shouldProtectReviewMemory(params.job, params.message);
+  const dedupeGuard = `const reviewMemoryProtectionEnabled = shouldProtectReviewMemory(params.job, params.message);
+const dailySingletonEnabled = shouldProtectDailySingleton(params.job, params.message);
+const bypassDuplicateDayGuard = shouldBypassDuplicateDayGuard(params.job);
 const reviewMemoryCtx = snapshotReviewMemoryBeforeRun({
   workspaceDir,
   runAtMs: runStartedAt,
   tz: params.job.schedule?.tz,
   sessionId: runSessionId,
-  shouldProtect: reviewMemoryEnabled
+  shouldProtect: reviewMemoryProtectionEnabled
 });
 const cronDayKey = buildCronDayKey(params.job.id, params.job.schedule?.tz, runStartedAt);
 const stateLastRunAtMs = params.job?.state?.lastRunAtMs;
@@ -545,11 +583,12 @@ const stateDayKey =
     ? buildCronDayKey(params.job.id, params.job.schedule?.tz, stateLastRunAtMs)
     : null;
 if (
-  reviewMemoryEnabled &&
+  dailySingletonEnabled &&
+  !bypassDuplicateDayGuard &&
   stateDayKey === cronDayKey &&
   isDuplicateSkipStatus(params.job?.state?.lastStatus)
 ) {
-  const message = \`skip duplicate daily review run: \${cronDayKey}\`;
+  const message = \`skip duplicate daily run: \${cronDayKey}\`;
   return withRunSession({
     status: "skipped_duplicate",
     summary: message,
@@ -560,17 +599,71 @@ const cronRunLogPath = resolveCronRunLogPath({
   storePath: resolveCronStorePath(params.cfg.cron?.store),
   jobId: params.job.id
 });
-if (reviewMemoryEnabled && await shouldSkipDuplicateDay(cronRunLogPath, cronDayKey, {
+if (dailySingletonEnabled && !bypassDuplicateDayGuard && await shouldSkipDuplicateDay(cronRunLogPath, cronDayKey, {
   jobId: params.job.id,
   tz: params.job.schedule?.tz
 })) {
-  const message = \`skip duplicate daily review run: \${cronDayKey}\`;
+  const message = \`skip duplicate daily run: \${cronDayKey}\`;
   return withRunSession({
     status: "skipped_duplicate",
     summary: message,
     outputText: message
   });
 }`;
+  if (!updated.includes('const forceRun = mode === "force" || mode === "force_allow_duplicate_day";')) {
+    updated = updated.replace(
+      /if\s*\(!isJobDue\(job,\s*now,\s*\{\s*forced:\s*mode === "force"\s*\}\)\)\s*return\s*\{/m,
+      'const forceRun = mode === "force" || mode === "force_allow_duplicate_day";\n\t\tif (!isJobDue(job, now, { forced: forceRun })) return {'
+    );
+  }
+  if (!updated.includes("manual-rerun-blocked-non-error")) {
+    updated = updated.replace(
+      /const\s+forceRun\s*=\s*mode === "force"\s*\|\|\s*mode === "force_allow_duplicate_day";\s*\n\s*if\s*\(!isJobDue\(job,\s*now,\s*\{\s*forced:\s*forceRun\s*\}\)\)\s*return\s*\{/m,
+      `const forceRun = mode === "force" || mode === "force_allow_duplicate_day";
+\t\tconst bypassManualRerunGate = mode === "force_allow_duplicate_day";
+\t\tconst manualErrorOnlyRerunProtectedJob =
+\t\t\ttypeof job?.id === "string" &&
+\t\t\tjob.id === "fb1707cc-ed1b-431e-9dc7-5348a60a27a5";
+\t\tif (
+\t\t\tmanualErrorOnlyRerunProtectedJob &&
+\t\t\tmode === "force" &&
+\t\t\t!bypassManualRerunGate &&
+\t\t\ttypeof job?.state?.lastStatus === "string" &&
+\t\t\tjob.state.lastStatus !== "error"
+\t\t) return {
+\t\t\tok: true,
+\t\t\tran: false,
+\t\t\treason: "manual-rerun-blocked-non-error"
+\t\t};
+\t\tif (!isJobDue(job, now, { forced: forceRun })) return {`
+    );
+  }
+  if (!updated.includes("executionJob.__openclawAllowDuplicateDay = true;")) {
+    updated = updated.replace(
+      /const\s+executionJob\s*=\s*JSON\.parse\(JSON\.stringify\(job\)\);/m,
+      'const executionJob = JSON.parse(JSON.stringify(job));\n\t\tif (mode === "force_allow_duplicate_day") executionJob.__openclawAllowDuplicateDay = true;'
+    );
+  }
+  if (!updated.includes("allowForceDuplicateMode")) {
+    updated = updated.replace(
+      /if\s*\(!validateCronRunParams\(params\)\)\s*\{\s*respond\(\s*false\s*,\s*void 0\s*,\s*errorShape\(\s*ErrorCodes\.INVALID_REQUEST\s*,\s*`invalid cron\.run params: \$\{formatValidationErrors\(validateCronRunParams\.errors\)\}`\s*\)\s*\);\s*return;\s*\}/m,
+      `const allowForceDuplicateMode =
+      typeof params?.id === "string" &&
+      params.id.trim().length > 0 &&
+      params?.mode === "force_allow_duplicate_day";
+    if (!validateCronRunParams(params) && !allowForceDuplicateMode) {
+      respond(
+        false,
+        void 0,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          \`invalid cron.run params: \${formatValidationErrors(validateCronRunParams.errors)}\`
+        )
+      );
+      return;
+    }`
+    );
+  }
   const preRunAnchor = "let runEndedAt = runStartedAt;";
   if (!preRunGuardPattern.test(updated) && updated.includes(preRunAnchor)) {
     updated = updated.replace(preRunAnchor, `${preRunAnchor}\n${dedupeGuard}`);
@@ -584,11 +677,12 @@ const stateDayKey =
     ? buildCronDayKey(params.job.id, params.job.schedule?.tz, stateLastRunAtMs)
     : null;
 if (
-  reviewMemoryEnabled &&
+  dailySingletonEnabled &&
+  !bypassDuplicateDayGuard &&
   stateDayKey === cronDayKey &&
   isDuplicateSkipStatus(params.job?.state?.lastStatus)
 ) {
-  const message = \`skip duplicate daily review run: \${cronDayKey}\`;
+  const message = \`skip duplicate daily run: \${cronDayKey}\`;
   return withRunSession({
     status: "skipped_duplicate",
     summary: message,
@@ -647,6 +741,21 @@ if (reviewMemoryAfter?.changedAfterRun) {
   }
 
   return updated;
+}
+
+export function patchCronCliSource(source) {
+  const patchedModeSnippet =
+    'mode: opts.due ? "due" : process?.env?.OPENCLAW_CRON_ALLOW_DUPLICATE_DAY === "1" ? "force_allow_duplicate_day" : "force"';
+  if (source.includes(patchedModeSnippet)) {
+    return source;
+  }
+
+  const modePattern = /mode:\s*opts\.due\s*\?\s*"due"\s*:\s*"force"/m;
+  if (!modePattern.test(source)) {
+    throw new Error("Cron CLI duplicate-day bypass patch anchor not found");
+  }
+
+  return source.replace(modePattern, patchedModeSnippet);
 }
 
 export function patchReplySource(source) {
@@ -782,6 +891,13 @@ function isPatchableDeliverSource(source) {
   );
 }
 
+function isPatchableCronCliSource(source) {
+  return (
+    /mode:\s*opts\.due\s*\?\s*"due"\s*:\s*"force"/m.test(source) ||
+    source.includes("force_allow_duplicate_day")
+  );
+}
+
 function isPatchableMirrorSource(source) {
   return MIRROR_TRANSCRIPT_FUNCTION_PATTERN.test(source);
 }
@@ -900,6 +1016,14 @@ const TARGET_SPECS = [
     pattern: /^gateway-cli-.*\.js$/,
     patcher: patchGatewayCronSource,
     isPatchable: () => true,
+  },
+  {
+    kind: "cron-cli",
+    marker: "duplicate-day-bypass-mode",
+    pattern: /^cron-cli-.*\.js$/,
+    patcher: patchCronCliSource,
+    isPatchable: isPatchableCronCliSource,
+    optional: true,
   },
   {
     kind: "reply",

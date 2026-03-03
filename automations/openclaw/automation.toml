@@ -1,7 +1,7 @@
 version = 1
 id = "openclaw"
 name = "OpenClaw 每日备份"
-prompt = "每次运行时先用系统本地时间动态计算当天日期（date +%F），不要硬编码日期。将 /Users/crane/.openclaw 完整备份到 /Users/crane/openclaw-backups/YYYY-MM-DD。若当天目录已存在，只删除当天目录后重建，再执行同步，确保是最新完整备份。清理时仅处理 /Users/crane/openclaw-backups 下名称严格匹配 YYYY-MM-DD 的目录，删除“早于当天-7天”的旧备份，其他目录一律不动。完成后在收件箱汇报：本次备份目录、备份大小、删除的旧备份列表（无则写“无”）、以及用于计算的当天日期。"
+prompt = "每次运行时先用系统本地时间动态计算当天日期（date +%F），不要硬编码日期。将 /Users/crane/.openclaw 完整备份到 /Users/crane/openclaw-backups/YYYY-MM-DD。若当天目录已存在，只删除当天目录后重建，再执行同步，确保是最新完整备份。清理时仅处理 /Users/crane/openclaw-backups 下名称严格匹配 YYYY-MM-DD 的目录，删除“早于或等于当天-7天”的旧备份，其他目录一律不动。完成后在收件箱汇报：本次备份目录、备份大小、删除的旧备份列表（无则写“无”）、以及用于计算的当天日期。"
 status = "ACTIVE"
 rrule = "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA,SU;BYHOUR=3;BYMINUTE=0"
 execution_environment = "local"

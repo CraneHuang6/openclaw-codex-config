@@ -13,6 +13,8 @@ DEFAULT_RETRY_SLEEP_SECONDS="${OPENCLAW_DAILY_UPDATE_RETRY_SLEEP_SECONDS:-10}"
 DEFAULT_REQUIRED_LAUNCHD_LABELS="${OPENCLAW_DAILY_UPDATE_REQUIRED_LAUNCHD_LABELS:-ai.openclaw.gateway,ai.openclaw.config-guard,ai.openclaw.config-guard-watch}"
 DEFAULT_RETRY_REGISTRIES="${OPENCLAW_DAILY_UPDATE_RETRY_REGISTRIES:-https://registry.npmjs.org,https://registry.npmmirror.com}"
 DEFAULT_KNOWN_BUG_FIX_SCRIPT="${OPENCLAW_DAILY_UPDATE_KNOWN_BUG_FIX_SCRIPT:-$DEFAULT_OPENCLAW_HOME/scripts/openclaw-update-known-bug-fix.sh}"
+DEFAULT_EXPECTED_PRIMARY_MODEL="${OPENCLAW_DAILY_UPDATE_EXPECTED_PRIMARY_MODEL:-qmcode/gpt-5.3-codex}"
+DEFAULT_EXPECTED_FALLBACKS_JSON="${OPENCLAW_DAILY_UPDATE_EXPECTED_FALLBACKS_JSON:-[\"qmcode/gpt-5.2\",\"openrouter/arcee-ai/trinity-large-preview:free\"]}"
 
 do_update=false
 openclaw_home="$DEFAULT_OPENCLAW_HOME"
@@ -29,6 +31,8 @@ npm_registry="${OPENCLAW_NPM_REGISTRY:-}"
 max_retries="$DEFAULT_MAX_RETRIES"
 retry_sleep_seconds="$DEFAULT_RETRY_SLEEP_SECONDS"
 required_launchd_labels="$DEFAULT_REQUIRED_LAUNCHD_LABELS"
+expected_primary_model="$DEFAULT_EXPECTED_PRIMARY_MODEL"
+expected_fallbacks_json="$DEFAULT_EXPECTED_FALLBACKS_JSON"
 skip_launchd_check="${OPENCLAW_DAILY_UPDATE_SKIP_LAUNCHD_CHECK:-0}"
 latest_version_cmd="${OPENCLAW_DAILY_UPDATE_LATEST_VERSION_CMD:-}"
 check_latest_on_skip="${OPENCLAW_DAILY_UPDATE_CHECK_LATEST_ON_SKIP:-0}"
@@ -1347,9 +1351,19 @@ if (( security_audit_exit != 0 )); then
 fi
 
 model_fields="$(
-  python3 - "$config_path" <<'PY'
+  python3 - "$config_path" "$expected_primary_model" "$expected_fallbacks_json" <<'PY'
 import json, sys
 doc = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+expected_primary = sys.argv[2]
+expected_fallbacks_raw = sys.argv[3]
+try:
+  expected_fallbacks = json.loads(expected_fallbacks_raw)
+except Exception as exc:
+  print(f"invalid expected fallbacks json: {exc}", file=sys.stderr)
+  raise SystemExit(1)
+if not isinstance(expected_fallbacks, list):
+  print("invalid expected fallbacks json: expected a JSON array", file=sys.stderr)
+  raise SystemExit(1)
 m = doc.get("agents", {}).get("defaults", {}).get("model", {})
 primary = m.get("primary")
 fallbacks = m.get("fallbacks")
@@ -1361,11 +1375,14 @@ skills_entries = skills.get("entries", {}) or {}
 plugin_feishu = bool((plugins_entries.get("feishu") or {}).get("enabled", False))
 plugin_memory = bool((plugins_entries.get("memory-core") or {}).get("enabled", False))
 skill_selfie = bool((skills_entries.get("xiaoke-selfie") or {}).get("enabled", False))
-fallbacks_ok = isinstance(fallbacks, list) and len(fallbacks) == 0
-model_pass = (primary == "kimi-coding/k2p5") and fallbacks_ok
+fallbacks_match = isinstance(fallbacks, list) and fallbacks == expected_fallbacks
+model_pass = (primary == expected_primary) and fallbacks_match
 config_pass = plugins_enabled and plugin_feishu and plugin_memory and skill_selfie
 print(f"primary={primary}")
 print(f"fallbacks={fallbacks}")
+print(f"expected_primary={expected_primary}")
+print(f"expected_fallbacks={expected_fallbacks}")
+print("fallbacks_match=yes" if fallbacks_match else "fallbacks_match=no")
 print(f"plugins_enabled={plugins_enabled}")
 print(f"plugin_feishu={plugin_feishu}")
 print(f"plugin_memory_core={plugin_memory}")
@@ -1376,6 +1393,9 @@ PY
 )"
 model_primary="$(printf '%s\n' "$model_fields" | awk -F= '/^primary=/{print $2}')"
 model_fallbacks="$(printf '%s\n' "$model_fields" | awk -F= '/^fallbacks=/{print $2}')"
+model_expected_primary="$(printf '%s\n' "$model_fields" | awk -F= '/^expected_primary=/{print $2}')"
+model_expected_fallbacks="$(printf '%s\n' "$model_fields" | awk -F= '/^expected_fallbacks=/{print $2}')"
+model_fallbacks_match="$(printf '%s\n' "$model_fields" | awk -F= '/^fallbacks_match=/{print $2}')"
 model_pass="$(printf '%s\n' "$model_fields" | awk -F= '/^model_pass=/{print $2}')"
 config_pass="$(printf '%s\n' "$model_fields" | awk -F= '/^config_pass=/{print $2}')"
 
@@ -1625,6 +1645,9 @@ cat > "$REPORT_FILE" <<EOF
 - model_check: $( [[ "$model_pass" == "yes" ]] && echo pass || echo fail )
 - model_primary: ${model_primary}
 - model_fallbacks: ${model_fallbacks}
+- model_expected_primary: ${model_expected_primary}
+- model_expected_fallbacks: ${model_expected_fallbacks}
+- model_fallbacks_match: ${model_fallbacks_match}
 - config_check: ${config_status}
 - launchd_check: ${launchd_status}
 - gateway_self_heal: ${gateway_self_heal_status}

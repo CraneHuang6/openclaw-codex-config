@@ -14,6 +14,9 @@ DEFAULT_MEDIA_PATH_REPATCH_SCRIPT="${SELF_SCRIPT_DIR}/repatch-openclaw-feishu-me
 DEFAULT_NANO_BANANA_REPATCH_SCRIPT="${SELF_SCRIPT_DIR}/repatch-openclaw-nano-banana-model.sh"
 DEFAULT_RUNTIME_PATCH_SCRIPT="${SELF_SCRIPT_DIR}/patch-openclaw-runtime-hardening.mjs"
 DEFAULT_MODEL_GUARD_SCRIPT="${SELF_SCRIPT_DIR}/enforce-openclaw-kimi-model.sh"
+DEFAULT_MODEL_GUARD_PRIMARY_MODEL="qmcode/gpt-5.3-codex"
+DEFAULT_MODEL_GUARD_PRIMARY_ALIAS="GPT-5.3 Codex"
+DEFAULT_MODEL_GUARD_FALLBACK_MODELS=("qmcode/gpt-5.2" "openrouter/arcee-ai/trinity-large-preview:free")
 DEFAULT_MEDIA_TRANSCRIBE_GUARD_SCRIPT="${SELF_SCRIPT_DIR}/enforce-openclaw-media-transcribe-bins.sh"
 DEFAULT_PLUGIN_SKILL_GUARD_SCRIPT="${SELF_SCRIPT_DIR}/enforce-openclaw-plugin-skill-deps.sh"
 DEFAULT_AUTH_PROFILES_GUARD_SCRIPT="${SELF_SCRIPT_DIR}/ensure-openclaw-auth-profiles.sh"
@@ -48,11 +51,13 @@ REPLY_VOICE_FASTPATH_MARKER='reply voice synthesis failed after ${sentChunks} ch
 REPLY_VOICE_PARSE_MARKER="parseReplyTargetContentForVoice"
 REPLY_VOICE_SEGMENT_MARKER="splitReplyVoiceText(replyText, 500)"
 REPLY_VOICE_STATE_CACHE_MARKER='const voiceModeStateCache = new Map<string, "on" | "off">();'
+REPLY_VOICE_STATE_BRIDGE_MARKER="const voiceModeStateBridge = createVoiceModeStateBridge();"
 REPLY_VOICE_LOCAL_TOGGLE_MARKER="handled voice mode command locally ("
 REPLY_VOICE_FORCE_TTS_MARKER="forceVoiceModeTts: voiceModeEnabled"
 REPLY_VOICE_MODE_ENABLED_LOG_MARKER="voice mode enabled for session"
 REPLY_VOICE_COMMAND_FILE_MARKER="splitReplyVoiceText"
 REPLY_VOICE_TTS_MARKER="createReplyVoiceTtsBridge"
+REPLY_VOICE_TTS_STATE_BRIDGE_MARKER="createVoiceModeStateBridge"
 REPLY_VOICE_TTS_MEDIA_MARKER='startsWith("MEDIA:")'
 REPLY_VOICE_MISSING_SCRIPT_HINT_MARKER="无法找到语音脚本，请检查 xiaoke-voice-mode/scripts/generate_tts_media.sh。"
 REPLY_VOICE_TTS_SCRIPT_NOT_FOUND_MARKER="reply voice script not found; checked:"
@@ -820,6 +825,14 @@ else
   didaapi_subtasks_repatch_args+=(--apply)
 fi
 
+model_guard_args+=(
+  --primary-model "$DEFAULT_MODEL_GUARD_PRIMARY_MODEL"
+  --primary-alias "$DEFAULT_MODEL_GUARD_PRIMARY_ALIAS"
+)
+for model_guard_fallback in "${DEFAULT_MODEL_GUARD_FALLBACK_MODELS[@]}"; do
+  model_guard_args+=(--fallback-model "$model_guard_fallback")
+done
+
 if [[ -n "$target_file" ]]; then
   account_args+=(--target-file "$target_file")
 fi
@@ -891,6 +904,7 @@ if [[ "$dry_run" == "false" ]]; then
   require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_PARSE_MARKER" "feishu reply voice"
   require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_SEGMENT_MARKER" "feishu reply voice"
   require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_STATE_CACHE_MARKER" "feishu voice mode state"
+  require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_STATE_BRIDGE_MARKER" "feishu voice mode state"
   require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_LOCAL_TOGGLE_MARKER" "feishu voice mode state"
   require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_FORCE_TTS_MARKER" "feishu voice mode state"
   require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_MODE_ENABLED_LOG_MARKER" "feishu voice mode state"
@@ -929,6 +943,7 @@ if [[ "$dry_run" == "false" ]]; then
   require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_SLOW_NOTICE_TIMER_GUARD_MARKER" "feishu slow notice disable"
   require_file_marker "$video_target_root/reply-voice-command.ts" "$REPLY_VOICE_COMMAND_FILE_MARKER" "feishu reply voice command"
   require_file_marker "$video_target_root/reply-voice-tts.ts" "$REPLY_VOICE_TTS_MARKER" "feishu reply voice tts"
+  require_file_marker "$video_target_root/reply-voice-tts.ts" "$REPLY_VOICE_TTS_STATE_BRIDGE_MARKER" "feishu reply voice state bridge"
   require_file_marker "$video_target_root/reply-voice-tts.ts" "$REPLY_VOICE_TTS_MEDIA_MARKER" "feishu reply voice tts"
   require_file_marker "$video_target_root/reply-voice-tts.ts" "$REPLY_VOICE_TTS_SCRIPT_NOT_FOUND_MARKER" "feishu reply voice tts"
   require_file_marker "$video_target_root/reply-voice-tts.ts" "$REPLY_VOICE_TTS_TIMEOUT_ENV_MARKER" "feishu reply voice tts timeout"

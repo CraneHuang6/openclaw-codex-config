@@ -3,13 +3,16 @@ set -euo pipefail
 
 DEFAULT_OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 DEFAULT_CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$DEFAULT_OPENCLAW_HOME/openclaw.json}"
-DEFAULT_PRIMARY_MODEL="kimi-coding/k2p5"
-DEFAULT_PRIMARY_ALIAS="Kimi K2.5"
+DEFAULT_PRIMARY_MODEL="qmcode/gpt-5.3-codex"
+DEFAULT_PRIMARY_ALIAS="GPT-5.3 Codex"
+DEFAULT_FALLBACK_MODELS=("qmcode/gpt-5.2" "openrouter/arcee-ai/trinity-large-preview:free")
 
 mode="apply"
 config_path="$DEFAULT_CONFIG_PATH"
 primary_model="$DEFAULT_PRIMARY_MODEL"
 primary_alias="$DEFAULT_PRIMARY_ALIAS"
+fallback_models=("${DEFAULT_FALLBACK_MODELS[@]}")
+fallback_overridden=false
 
 show_help() {
   cat <<'EOF'
@@ -21,6 +24,7 @@ Options:
   --config-path <path>         Override openclaw config path.
   --primary-model <model-id>   Override enforced primary model id.
   --primary-alias <alias>      Override enforced model alias.
+  --fallback-model <model-id>  Add enforced fallback model id (repeatable).
   -h, --help                   Show this help message.
 EOF
 }
@@ -59,6 +63,18 @@ while (($#)); do
       primary_alias="$2"
       shift 2
       ;;
+    --fallback-model)
+      if (($# < 2)); then
+        echo "missing value for --fallback-model" >&2
+        exit 2
+      fi
+      if [[ "$fallback_overridden" != "true" ]]; then
+        fallback_models=()
+        fallback_overridden=true
+      fi
+      fallback_models+=("$2")
+      shift 2
+      ;;
     -h|--help)
       show_help
       exit 0
@@ -85,11 +101,12 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-node - "$config_path" "$mode" "$primary_model" "$primary_alias" <<'NODE'
+node - "$config_path" "$mode" "$primary_model" "$primary_alias" "${fallback_models[@]}" <<'NODE'
 const fs = require("fs");
 const path = require("path");
 
-const [configPath, mode, primaryModel, primaryAlias] = process.argv.slice(2);
+const [configPath, mode, primaryModel, primaryAlias, ...fallbackModels] =
+  process.argv.slice(2);
 
 let doc;
 try {
@@ -131,8 +148,12 @@ if (model.primary !== primaryModel) {
   changed = true;
 }
 
-if (!Array.isArray(model.fallbacks) || model.fallbacks.length !== 0) {
-  model.fallbacks = [];
+if (
+  !Array.isArray(model.fallbacks) ||
+  model.fallbacks.length !== fallbackModels.length ||
+  model.fallbacks.some((value, index) => value !== fallbackModels[index])
+) {
+  model.fallbacks = [...fallbackModels];
   changed = true;
 }
 
@@ -164,7 +185,7 @@ const result = {
   changed,
   configPath,
   primaryModel,
-  fallbacks: []
+  fallbacks: fallbackModels
 };
 
 console.log(JSON.stringify(result));

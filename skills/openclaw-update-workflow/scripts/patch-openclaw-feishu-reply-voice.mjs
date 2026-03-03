@@ -15,13 +15,15 @@ const TYPE_IMPORT_ANCHORS = [
 const TYPE_IMPORT_FALLBACK_PATTERN = /import\s+type\s+\{[^}]+\}\s+from\s+"\.\/types\.js";/g;
 const REPLY_VOICE_COMMAND_IMPORT =
   'import { normalizeReplyVoiceCommand, resolveReplyVoiceCommand, splitReplyVoiceText } from "./reply-voice-command.js";';
-const REPLY_VOICE_TTS_IMPORT = 'import { createReplyVoiceTtsBridge } from "./reply-voice-tts.js";';
+const REPLY_VOICE_TTS_IMPORT =
+  'import { createReplyVoiceTtsBridge, createVoiceModeStateBridge } from "./reply-voice-tts.js";';
 const REPLY_VOICE_IMPORT_MARKER = REPLY_VOICE_COMMAND_IMPORT;
 const REPLY_VOICE_COMMAND_IMPORT_PATTERN =
   /import\s+\{[^}]*\}\s+from\s+"\.\/reply-voice-command\.js";\n?/g;
 const REPLY_VOICE_TTS_IMPORT_PATTERN =
-  /import\s+\{\s*createReplyVoiceTtsBridge\s*\}\s+from\s+"\.\/reply-voice-tts\.js";\n?/g;
+  /import\s+\{[^}]*createReplyVoiceTtsBridge[^}]*\}\s+from\s+"\.\/reply-voice-tts\.js";\n?/g;
 const REPLY_VOICE_TTS_BRIDGE_MARKER = "const replyVoiceTtsBridge = createReplyVoiceTtsBridge();";
+const VOICE_MODE_STATE_BRIDGE_MARKER = "const voiceModeStateBridge = createVoiceModeStateBridge();";
 const VOICE_MODE_STATE_CACHE_MARKER = 'const voiceModeStateCache = new Map<string, "on" | "off">();';
 const VOICE_MODE_NO_REPLY_FALLBACK_TEXT_MARKER = "const VOICE_MODE_NO_REPLY_FALLBACK_TEXT =";
 const VOICE_MODE_NO_REPLY_FALLBACK_TEXT_BLOCK =
@@ -71,15 +73,23 @@ const REPLY_VOICE_RUNTIME_STATE_LEGACY_BLOCK = `  const voiceModeEnabled = false
   const slowReplyNotified = false;`;
 const REPLY_VOICE_RUNTIME_STATE_BLOCK = `  const voiceModeSessionKey = \`feishu:\${account.accountId}:\${isGroup ? "group" : "direct"}:\${isGroup ? ctx.chatId : ctx.senderOpenId}\`;
   const voiceModeCommandCandidate = resolveVoiceModeToggleCommand(ctx.content);
-  const voiceModeEnabled = voiceModeStateCache.get(voiceModeSessionKey) === "on";
+  const cachedVoiceModeState = voiceModeStateCache.get(voiceModeSessionKey);
+  const voiceModeState = await voiceModeStateBridge.get(voiceModeSessionKey, cachedVoiceModeState);
+  voiceModeStateCache.set(voiceModeSessionKey, voiceModeState);
+  const voiceModeEnabled = voiceModeState === "on";
   const slowReplyNotified = false;`;
+const REPLY_VOICE_RUNTIME_STATE_BLOCK_END_MARKER = "  const slowReplyNotified = false;";
 const REPLY_VOICE_MODE_TOGGLE_MARKER = "handled voice mode command locally (";
 const REPLY_VOICE_MODE_ENABLED_LOG_MARKER = "voice mode enabled for session";
+const REPLY_VOICE_MODE_TOGGLE_STATE_SET_MARKER =
+  "const nextVoiceModeState = await voiceModeStateBridge.set(voiceModeSessionKey, voiceModeCommandCandidate);";
 const REPLY_VOICE_MODE_TOGGLE_BLOCK_START_MARKER = "    if (voiceModeCommandCandidate) {\n";
 const REPLY_VOICE_MODE_TOGGLE_BLOCK_END_MARKER = "    if (replyVoiceCommandCandidate) {\n";
 const REPLY_VOICE_FASTPATH_MARKER = "reply voice synthesis failed after ${sentChunks} chunk(s):";
 const REPLY_VOICE_FASTPATH_ANCHOR =
   'const feishuTo = isGroup ? `chat:${ctx.chatId}` : `user:${ctx.senderOpenId}`;';
+const REPLY_VOICE_MENTION_GUARD_PATTERN =
+  /if\s*\(requireMention\s*&&\s*!ctx\.mentionedBot\)/g;
 const REPLY_VOICE_MISSING_SCRIPT_HINT_MARKER =
   "无法找到语音脚本，请检查 xiaoke-voice-mode/scripts/generate_tts_media.sh。";
 const REPLY_VOICE_FASTPATH_START_MARKER = "    if (replyVoiceCommandCandidate) {\n";
@@ -183,10 +193,12 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT_MS = 90_000;
+const DEFAULT_STATE_TIMEOUT_MS = 5_000;
 const MIN_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BUFFER = 2 * 1024 * 1024;
 const MIN_MAX_BUFFER = 256 * 1024;
 
+export type VoiceModeState = "on" | "off";
 export type ReplyVoiceExecResult = { stdout?: string; stderr?: string } | string;
 export type ReplyVoiceExec = (
   file: string,
@@ -323,6 +335,71 @@ function buildScriptPathCandidates(explicitScriptPath?: string): string[] {
   return uniqueNonEmpty(candidates);
 }
 
+function buildStateScriptPathCandidates(explicitScriptPath?: string): string[] {
+  const envScript = process.env.XIAOKE_VOICE_MODE_STATE_SCRIPT ?? "";
+  const openclawHome = process.env.OPENCLAW_HOME?.trim() || "";
+  const home = process.env.HOME?.trim() || "";
+
+  return uniqueNonEmpty([
+    explicitScriptPath ?? "",
+    envScript,
+    openclawHome
+      ? \`\${openclawHome}/workspace/skills/xiaoke-voice-mode/scripts/voice_mode_state.sh\`
+      : "",
+    home ? \`\${home}/.openclaw/workspace/skills/xiaoke-voice-mode/scripts/voice_mode_state.sh\` : "",
+    "/Users/crane/.openclaw/workspace/skills/xiaoke-voice-mode/scripts/voice_mode_state.sh",
+  ]);
+}
+
+function normalizeVoiceModeState(value: string | undefined, fallback: VoiceModeState = "off"): VoiceModeState {
+  return value?.trim() === "on" ? "on" : fallback;
+}
+
+export function createVoiceModeStateBridge(params: {
+  stateScriptPath?: string;
+  exec?: ReplyVoiceExec;
+} = {}) {
+  const stateScriptPathCandidates = buildStateScriptPathCandidates(params.stateScriptPath);
+  const execImpl = params.exec ?? defaultExec;
+
+  return {
+    async get(sessionKey: string, fallbackState?: string): Promise<VoiceModeState> {
+      const scriptPath = stateScriptPathCandidates.find((candidate) => existsSync(candidate));
+      const normalizedFallback = normalizeVoiceModeState(fallbackState, "off");
+      if (!scriptPath) {
+        return normalizedFallback;
+      }
+
+      try {
+        const result = await execImpl("bash", [scriptPath, "get", sessionKey], {
+          timeout: DEFAULT_STATE_TIMEOUT_MS,
+          maxBuffer: MIN_MAX_BUFFER,
+        });
+        return normalizeVoiceModeState(normalizeStdout(result), normalizedFallback);
+      } catch {
+        return normalizedFallback;
+      }
+    },
+    async set(sessionKey: string, mode: VoiceModeState): Promise<VoiceModeState> {
+      const scriptPath = stateScriptPathCandidates.find((candidate) => existsSync(candidate));
+      const normalizedMode = normalizeVoiceModeState(mode, "off");
+      if (!scriptPath) {
+        return normalizedMode;
+      }
+
+      try {
+        const result = await execImpl("bash", [scriptPath, "set", sessionKey, normalizedMode], {
+          timeout: DEFAULT_STATE_TIMEOUT_MS,
+          maxBuffer: MIN_MAX_BUFFER,
+        });
+        return normalizeVoiceModeState(normalizeStdout(result), normalizedMode);
+      } catch (error) {
+        throw new Error(\`voice mode state script execution failed: \${describeExecError(error)}\`);
+      }
+    },
+  };
+}
+
 export function createReplyVoiceTtsBridge(params: {
   scriptPath?: string;
   exec?: ReplyVoiceExec;
@@ -457,7 +534,8 @@ const PARSE_REPLY_VOICE_FUNCTION = `function parseReplyTargetContentForVoice(con
 `;
 
 const REPLY_VOICE_MODE_TOGGLE_BLOCK = `    if (voiceModeCommandCandidate) {
-      voiceModeStateCache.set(voiceModeSessionKey, voiceModeCommandCandidate);
+      const nextVoiceModeState = await voiceModeStateBridge.set(voiceModeSessionKey, voiceModeCommandCandidate);
+      voiceModeStateCache.set(voiceModeSessionKey, nextVoiceModeState);
       log(
         \`feishu[\${account.accountId}]: handled voice mode command locally (\${voiceModeCommandCandidate}, \${voiceModeSessionKey})\`,
       );
@@ -587,7 +665,7 @@ const NO_FINAL_FALLBACK_BLOCK = `    try {
     let hadOutboundMediaDelivery = outboundMediaState === true;
     let supplementalVoiceFailed = false;
     const noFinalFallbackState = !queuedFinal && finalCount === 0;
-
+    void noFinalFallbackState;
     if (
       voiceModeEnabled &&
       queuedFinal &&
@@ -595,16 +673,19 @@ const NO_FINAL_FALLBACK_BLOCK = `    try {
       (!hasOutboundMediaSignal || !hadOutboundMediaDelivery)
     ) {
       const voiceCandidate = (dispatcherState.__openclawFeishuNoFinalTextCandidate?.() ?? "").trim();
-      if (voiceCandidate.length > 0) {
+      const voiceChunks = splitReplyVoiceText(voiceCandidate, 500);
+      if (voiceChunks.length > 0) {
         try {
-          const { mediaUrl } = await replyVoiceTtsBridge.generate(voiceCandidate);
-          await sendMediaFeishu({
-            cfg,
-            to: feishuTo,
-            mediaUrl,
-            replyToMessageId: ctx.messageId,
-            accountId: account.accountId,
-          });
+          for (const voiceChunk of voiceChunks) {
+            const { mediaUrl } = await replyVoiceTtsBridge.generate(voiceChunk);
+            await sendMediaFeishu({
+              cfg,
+              to: feishuTo,
+              mediaUrl,
+              replyToMessageId: ctx.messageId,
+              accountId: account.accountId,
+            });
+          }
           hadOutboundDelivery = true;
           hadOutboundMediaDelivery = true;
           log(
@@ -714,14 +795,9 @@ const NO_FINAL_FALLBACK_BLOCK = `    try {
       );
     }
 
-    if (
-      noFinalFallbackState ||
-      voiceNoDeliveryAfterSupplementFailureFallbackState
-    ) {
+    if (voiceNoDeliveryAfterSupplementFailureFallbackState) {
       const noFinalTextCandidate =
-        !voiceModeEnabled || voiceNoDeliveryAfterSupplementFailureFallbackState
-        ? (dispatcherState.__openclawFeishuNoFinalTextCandidate?.() ?? "").trim()
-        : "";
+        (dispatcherState.__openclawFeishuNoFinalTextCandidate?.() ?? "").trim();
       if (noFinalTextCandidate.length > 0) {
         log(
           \`feishu[\${account.accountId}]: using no-final text candidate from dispatcher\`,
@@ -816,7 +892,7 @@ function upsertVoiceModeToggleBlock(source) {
   let updated = source;
 
   if (
-    updated.includes(REPLY_VOICE_MODE_TOGGLE_MARKER) &&
+    updated.includes(REPLY_VOICE_MODE_TOGGLE_STATE_SET_MARKER) &&
     updated.includes(REPLY_VOICE_MODE_ENABLED_LOG_MARKER)
   ) {
     return updated;
@@ -1253,6 +1329,13 @@ function upsertReplyVoiceDispatcherCreateOptions(source) {
   return updated;
 }
 
+function upsertReplyVoiceMentionGuardBypass(source) {
+  return source.replace(
+    REPLY_VOICE_MENTION_GUARD_PATTERN,
+    "if (requireMention && !ctx.mentionedBot && !voiceModeCommandCandidate && !replyVoiceCommandCandidate)",
+  );
+}
+
 function findImportAnchor(source) {
   for (const anchor of TYPE_IMPORT_ANCHORS) {
     if (source.includes(anchor)) {
@@ -1312,8 +1395,15 @@ export function patchFeishuBotReplyVoiceSource(source) {
     updated = insertAfterAnchor(
       updated,
       PERMISSION_COOLDOWN_ANCHOR,
-      REPLY_VOICE_TTS_BRIDGE_MARKER,
+      `${REPLY_VOICE_TTS_BRIDGE_MARKER}\n${VOICE_MODE_STATE_BRIDGE_MARKER}`,
       "reply voice bridge const",
+    );
+  } else if (!updated.includes(VOICE_MODE_STATE_BRIDGE_MARKER)) {
+    updated = insertAfterAnchor(
+      updated,
+      REPLY_VOICE_TTS_BRIDGE_MARKER,
+      VOICE_MODE_STATE_BRIDGE_MARKER,
+      "voice mode state bridge const",
     );
   }
 
@@ -1392,8 +1482,20 @@ export function patchFeishuBotReplyVoiceSource(source) {
     );
   }
 
-  if (!updated.includes(REPLY_VOICE_RUNTIME_STATE_MARKER)) {
-    if (updated.includes(REPLY_VOICE_RUNTIME_STATE_LEGACY_BLOCK)) {
+  if (!updated.includes(REPLY_VOICE_RUNTIME_STATE_BLOCK)) {
+    if (updated.includes(REPLY_VOICE_RUNTIME_STATE_MARKER)) {
+      const runtimeStateStart = updated.indexOf(REPLY_VOICE_RUNTIME_STATE_MARKER);
+      const runtimeStateEnd = updated.indexOf(
+        REPLY_VOICE_RUNTIME_STATE_BLOCK_END_MARKER,
+        runtimeStateStart,
+      );
+      if (runtimeStateEnd === -1) {
+        throw new Error("reply voice runtime state block end marker not found");
+      }
+      updated = `${updated.slice(0, runtimeStateStart)}${REPLY_VOICE_RUNTIME_STATE_BLOCK}${updated.slice(
+        runtimeStateEnd + REPLY_VOICE_RUNTIME_STATE_BLOCK_END_MARKER.length,
+      )}`;
+    } else if (updated.includes(REPLY_VOICE_RUNTIME_STATE_LEGACY_BLOCK)) {
       updated = updated.replace(REPLY_VOICE_RUNTIME_STATE_LEGACY_BLOCK, REPLY_VOICE_RUNTIME_STATE_BLOCK);
     } else if (updated.includes(REPLY_VOICE_RUNTIME_STATE_LEGACY_MARKER)) {
       updated = updated.replace(REPLY_VOICE_RUNTIME_STATE_LEGACY_MARKER, REPLY_VOICE_RUNTIME_STATE_BLOCK);
@@ -1407,6 +1509,7 @@ export function patchFeishuBotReplyVoiceSource(source) {
     }
   }
 
+  updated = upsertReplyVoiceMentionGuardBypass(updated);
   updated = upsertVoiceModeToggleBlock(updated);
 
   if (!updated.includes(REPLY_VOICE_FASTPATH_MARKER)) {

@@ -13,6 +13,7 @@ const PRECHECK_TARGET = process.env.CODEX_FEISHU_TARGET || "ou_9911a4b1244b09203
 const DEDUPE_TTL_SECONDS = 6 * 3600;
 const POLL_MS = Number(process.env.CODEX_NOTIFY_POLL_MS || "2000");
 const COMPLETION_QUIET_MS = Number(process.env.CODEX_NOTIFY_COMPLETION_QUIET_MS || "20000");
+const USER_INPUT_TURN_LIMIT = Number(process.env.CODEX_NOTIFY_USER_INPUT_TURN_LIMIT || "64");
 const META_SCAN_CHUNK_BYTES = Number(process.env.CODEX_NOTIFY_META_SCAN_CHUNK_BYTES || "8192");
 const META_SCAN_MAX_BYTES = Number(process.env.CODEX_NOTIFY_META_SCAN_MAX_BYTES || "1048576");
 const READ_HISTORY = process.env.CODEX_NOTIFY_READ_HISTORY === "1";
@@ -314,6 +315,45 @@ function isFeishuInboundNotifyPayload(payload) {
   return inputMessages.some((m) => isFeishuInboundText(m));
 }
 
+function normalizeTurnId(turnId) {
+  if (!turnId) return "";
+  const t = String(turnId).trim();
+  return t && t !== "-" ? t : "";
+}
+
+function ensureUserInputState(state) {
+  if (!(state.userInputTurns instanceof Set)) {
+    state.userInputTurns = new Set(Array.isArray(state.userInputTurnOrder) ? state.userInputTurnOrder : []);
+  }
+  if (!Array.isArray(state.userInputTurnOrder)) {
+    state.userInputTurnOrder = Array.from(state.userInputTurns);
+  }
+}
+
+function markUserInputTurn(state, turnId) {
+  const t = normalizeTurnId(turnId);
+  if (!t) return;
+  ensureUserInputState(state);
+  if (state.userInputTurns.has(t)) return;
+
+  state.userInputTurns.add(t);
+  state.userInputTurnOrder.push(t);
+
+  const limit = Math.max(1, USER_INPUT_TURN_LIMIT);
+  while (state.userInputTurnOrder.length > limit) {
+    const oldest = state.userInputTurnOrder.shift();
+    if (!oldest) continue;
+    state.userInputTurns.delete(oldest);
+  }
+}
+
+function hasUserInputTurn(state, turnId) {
+  const t = normalizeTurnId(turnId);
+  if (!t) return false;
+  ensureUserInputState(state);
+  return state.userInputTurns.has(t);
+}
+
 function applySessionMetaToState(state, payload) {
   if (!payload || typeof payload !== "object") return false;
 
@@ -589,6 +629,7 @@ async function processRolloutFile(entry) {
     offset: READ_HISTORY ? 0 : entry.size,
     remainder: "",
     threadId: parseThreadIdFromPath(entry.path),
+    currentTurnId: "",
     turnId: "",
     cwd: "",
     feishuInbound: false,
@@ -599,8 +640,11 @@ async function processRolloutFile(entry) {
     metaHydrated: false,
     metaUnknownLogged: false,
     metaScanIncompleteLogged: false,
+    userInputTurns: new Set(),
+    userInputTurnOrder: [],
   };
 
+  ensureUserInputState(s);
   await hydrateRolloutMeta(entry.path, entry.size, s);
 
   if (entry.size < s.offset) {
@@ -642,7 +686,10 @@ async function processRolloutFile(entry) {
       }
 
       if (obj.type === "turn_context") {
-        if (obj.payload?.turn_id) s.turnId = obj.payload.turn_id;
+        if (obj.payload?.turn_id) {
+          s.turnId = obj.payload.turn_id;
+          s.currentTurnId = obj.payload.turn_id;
+        }
         if (obj.payload?.cwd) s.cwd = obj.payload.cwd;
         continue;
       }
@@ -653,6 +700,10 @@ async function processRolloutFile(entry) {
       }
 
       if (obj.type === "response_item") {
+        if (obj.payload?.type === "message" && obj.payload?.role === "user") {
+          markUserInputTurn(s, s.currentTurnId);
+        }
+
         const n = fromRolloutResponseItem(obj.payload, s.threadId, s.turnId, s.cwd);
         if (!n) continue;
         await routeNotification(n, "rollout-response_item");
@@ -660,10 +711,16 @@ async function processRolloutFile(entry) {
       }
 
       if (obj.type !== "event_msg") continue;
+      if (obj.payload?.type === "user_message") {
+        const eventTurnId = obj.payload?.turn_id || s.currentTurnId;
+        markUserInputTurn(s, eventTurnId);
+      }
       const n = fromRolloutEvent(obj.payload, s.threadId, s.cwd);
       if (!n) continue;
 
       if (n.kind === "task_complete") {
+        const completionTurnId = normalizeTurnId(n.turnId);
+
         if (s.isSubagent === null) {
           await log("INFO", `meta_hydrate_retry_on_task_complete thread=${s.threadId} file=${path.basename(entry.path)}`);
           await hydrateRolloutMeta(entry.path, entry.size, s, { force: true });
@@ -681,6 +738,11 @@ async function processRolloutFile(entry) {
 
         if (s.feishuInbound) {
           await log("INFO", `skip task_complete for feishu inbound thread=${s.threadId} turn=${n.turnId || "-"}`);
+          continue;
+        }
+
+        if (!hasUserInputTurn(s, completionTurnId)) {
+          await log("INFO", `skip task_complete without_user_input thread=${s.threadId} turn=${completionTurnId || n.turnId || "-"}`);
           continue;
         }
       }
