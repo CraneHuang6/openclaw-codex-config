@@ -328,16 +328,23 @@ function ensureUserInputState(state) {
   if (!Array.isArray(state.userInputTurnOrder)) {
     state.userInputTurnOrder = Array.from(state.userInputTurns);
   }
+  if (typeof state.pendingUserInputWithoutTurn !== "boolean") {
+    state.pendingUserInputWithoutTurn = false;
+  }
 }
 
 function markUserInputTurn(state, turnId) {
-  const t = normalizeTurnId(turnId);
-  if (!t) return;
   ensureUserInputState(state);
+  const t = normalizeTurnId(turnId);
+  if (!t) {
+    state.pendingUserInputWithoutTurn = true;
+    return;
+  }
   if (state.userInputTurns.has(t)) return;
 
   state.userInputTurns.add(t);
   state.userInputTurnOrder.push(t);
+  state.pendingUserInputWithoutTurn = false;
 
   const limit = Math.max(1, USER_INPUT_TURN_LIMIT);
   while (state.userInputTurnOrder.length > limit) {
@@ -642,6 +649,7 @@ async function processRolloutFile(entry) {
     metaScanIncompleteLogged: false,
     userInputTurns: new Set(),
     userInputTurnOrder: [],
+    pendingUserInputWithoutTurn: false,
   };
 
   ensureUserInputState(s);
@@ -689,6 +697,9 @@ async function processRolloutFile(entry) {
         if (obj.payload?.turn_id) {
           s.turnId = obj.payload.turn_id;
           s.currentTurnId = obj.payload.turn_id;
+          if (s.pendingUserInputWithoutTurn) {
+            markUserInputTurn(s, s.currentTurnId);
+          }
         }
         if (obj.payload?.cwd) s.cwd = obj.payload.cwd;
         continue;
