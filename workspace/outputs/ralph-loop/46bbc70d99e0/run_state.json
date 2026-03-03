@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "plan_path": "/tmp/ralph-plan1.XXXX.md",
+  "mode": "parallel",
+  "max_lanes": 1,
+  "created_at": "2026-03-03T13:59:02Z",
+  "updated_at": "2026-03-03T13:59:02Z",
+  "status": "completed",
+  "tasks": [
+    {
+      "id": "US-001",
+      "title": "A",
+      "line": 1,
+      "depends": [],
+      "status": "completed",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-001** A [depends: none]"
+    }
+  ]
+}

@@ -13,7 +13,7 @@ description: Use when maintaining OpenClaw on this machine after version updates
 ## When to Use
 
 - 升级 OpenClaw 到新版本后，需要自动重打本地补丁。
-- 每日巡检，需要检查最新版和本机健康状态，但不触发远端升级。
+- 每日巡检，默认先检查最新版和本机健康状态；若显示有新版本则自动进入 `full` 升级链路。
 - 更新后出现 Feishu 无回复、gateway timeout、model 回退等问题。
 - Feishu 能收到文本但看不到语音/附件（常见日志：`Local media path is not under an allowed directory`）。
 - 需要刷新 launchd 每日 4 点自动更新任务。
@@ -28,9 +28,9 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 
 模式：
 
-- `monitor`：巡检监控（`--skip-update` + 检查 `latest_version` + 生成报告）。推荐给 Codex 自动化。
+- `monitor`：巡检监控（先 `--skip-update` + 检查 `latest_version` + 生成报告；若 `latest_version > before_version` 则自动执行 `full`）。
 - `stable`：日常稳定维护（`--skip-update`）。
-- `full`：真实升级（`--with-update`，含三阶段自愈/回滚链路）。建议人工手动触发。
+- `full`：真实升级（`--with-update`，含三阶段自愈/回滚链路）。可人工手动强制触发。
   - 升级链路会先尝试安装 OpenClaw 最新 `.dmg`（GUI），再执行 CLI 更新与补丁。
 - `patch`：仅重打统一补丁链（不执行 `openclaw update`）。
 - `launchd-refresh`：刷新系统级每日自动更新任务。
@@ -52,6 +52,8 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
   - `OPENCLAW_SKILL_PROXY_PRECHECK_TIMEOUT`（默认 `5` 秒）
   - `OPENCLAW_SKILL_PROXY_PRECHECK_ATTEMPTS`（默认 `2`，失败后短重试）
   - `OPENCLAW_SKILL_PROXY_PRECHECK_RETRY_DELAY`（默认 `1` 秒）
+- monitor 自动升级开关：
+  - `OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION`（默认 `1`；设为 `0` 时仅巡检不自动执行 `full`）
 
 ```bash
 OPENCLAW_SKILL_HTTP_PROXY_HOST=192.168.1.2 \
@@ -62,7 +64,7 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 
 ## Standard Workflow
 
-1. 先选模式：Codex 自动化默认用 `monitor`；日常手工维护可用 `stable`；只有确认要升级版本时才手动用 `full`。
+1. 先选模式：Codex 自动化默认用 `monitor`（检测到新版本会自动进入 `full`）；日常手工维护可用 `stable`；需要无条件升级时可手动用 `full`。
 2. 执行封装脚本，并把额外参数透传给底层脚本（例如 `--feishu-target`、`--skip-launchd-check`）。
    - 统一更新脚本会校验 media-path 补丁 marker（`/tmp -> state/workspace/tmp-media` 桥接 + `uploadDurationCandidates` + `msgTypeCandidates(audio/media/file)`），缺失即失败，避免“看似成功但语音/附件发送回退”。
    - 统一更新脚本会校验 dedup 持久化导出 marker（`tryRecordMessagePersistent`），缺失即失败，避免“飞书能收消息但处理阶段崩溃无回复”（常见报错：`TypeError: ...tryRecordMessagePersistent is not a function`）。
@@ -266,7 +268,11 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 ## Common Commands
 
 ```bash
-# 每日巡检（自动化推荐）
+# 每日巡检（自动化推荐；检测到新版本会自动 full）
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh monitor
+
+# 每日巡检但禁用自动 full（仅巡检）
+OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION=0 \
 bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh monitor
 
 # 日常稳定维护

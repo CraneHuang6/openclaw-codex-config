@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "plan_path": "/var/folders/bf/x0zpptzs76v_z05ys5wttdy40000gn/T/tmp.Uiebpcn47V",
+  "mode": "hybrid",
+  "max_lanes": 5,
+  "created_at": "2026-03-03T13:55:33Z",
+  "updated_at": "2026-03-03T13:55:33Z",
+  "status": "active",
+  "tasks": [
+    {
+      "id": "A-1",
+      "title": "Task one",
+      "line": 1,
+      "depends": [],
+      "status": "claimed",
+      "lane": "lane-1",
+      "retries": 0,
+      "source": "**A-1** Task one [depends: none]"
+    },
+    {
+      "id": "A-2",
+      "title": "Task two",
+      "line": 2,
+      "depends": [],
+      "status": "claimed",
+      "lane": "lane-2",
+      "retries": 0,
+      "source": "**A-2** Task two [depends: none]"
+    },
+    {
+      "id": "A-3",
+      "title": "Task three",
+      "line": 3,
+      "depends": [],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**A-3** Task three [depends: none]"
+    }
+  ]
+}

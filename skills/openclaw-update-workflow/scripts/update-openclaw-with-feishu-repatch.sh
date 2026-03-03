@@ -83,8 +83,8 @@ REPLY_VOICE_SUPPLEMENTAL_FAILURE_FALLBACK_MARKER="supplemental voice delivery fa
 REPLY_VOICE_DISPATCH_DRAIN_MARKER="dispatcher.waitForIdle()"
 REPLY_VOICE_TIMEOUT_OVERRIDE_MARKER="const FEISHU_REPLY_TIMEOUT_OVERRIDE_SECONDS = 90;"
 REPLY_VOICE_FORCE_THINKING_OFF_MARKER='thinking: voiceModeEnabled ? "off" : undefined,'
-REPLY_VOICE_DISABLE_BLOCK_STREAMING_MARKER="disableBlockStreaming: true,"
-REPLY_VOICE_REPLY_OPTIONS_DISABLE_BLOCK_STREAMING_REGEX='replyOptions:[[:space:]]*\{[^}]*disableBlockStreaming:[[:space:]]*true'
+REPLY_VOICE_DISABLE_BLOCK_STREAMING_REGEX='disableBlockStreaming:[[:space:]]*(true|voiceModeEnabled[[:space:]]*\?[[:space:]]*true[[:space:]]*:[[:space:]]*undefined),'
+REPLY_VOICE_REPLY_OPTIONS_DISABLE_BLOCK_STREAMING_REGEX='replyOptions:[[:space:]]*\{[^}]*disableBlockStreaming:[[:space:]]*(true|voiceModeEnabled[[:space:]]*\?[[:space:]]*true[[:space:]]*:[[:space:]]*undefined)'
 REPLY_VOICE_CREATE_DISPATCHER_CALL_MARKER="createFeishuReplyDispatcher({"
 REPLY_VOICE_SLOW_NOTICE_DISABLED_MARKER="const FEISHU_SLOW_REPLY_NOTICE_ENABLED = false;"
 REPLY_VOICE_SLOW_NOTICE_TIMER_GUARD_MARKER="const slowReplyTimer = FEISHU_SLOW_REPLY_NOTICE_ENABLED"
@@ -936,7 +936,7 @@ if [[ "$dry_run" == "false" ]]; then
   require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_DISPATCH_DRAIN_MARKER" "feishu reply voice dispatch drain"
   require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_TIMEOUT_OVERRIDE_MARKER" "feishu reply timeout override"
   require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_FORCE_THINKING_OFF_MARKER" "feishu reply voice thinking off"
-  require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_DISABLE_BLOCK_STREAMING_MARKER" "feishu reply voice block streaming disable"
+  require_file_regex "$video_target_root/bot.ts" "$REPLY_VOICE_DISABLE_BLOCK_STREAMING_REGEX" "feishu reply voice block streaming disable"
   require_file_regex "$video_target_root/bot.ts" "$REPLY_VOICE_REPLY_OPTIONS_DISABLE_BLOCK_STREAMING_REGEX" "feishu reply voice replyOptions block streaming disable"
   require_anchor_block_marker "$video_target_root/bot.ts" "$REPLY_VOICE_CREATE_DISPATCHER_CALL_MARKER" "$REPLY_VOICE_FORCE_TTS_MARKER" "feishu reply voice dispatcher force tts bridge"
   require_file_marker "$video_target_root/bot.ts" "$REPLY_VOICE_SLOW_NOTICE_DISABLED_MARKER" "feishu slow notice disable"

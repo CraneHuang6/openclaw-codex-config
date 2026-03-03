@@ -11,6 +11,7 @@ VOICE_DOCTOR_SCRIPT="${OPENCLAW_SKILL_VOICE_DOCTOR_SCRIPT:-$SCRIPT_DIR/feishu-vo
 FEISHU_NO_REPLY_PRECHECK_SCRIPT="${OPENCLAW_SKILL_FEISHU_NO_REPLY_PRECHECK_SCRIPT:-$SCRIPT_DIR/feishu-no-reply-precheck.sh}"
 SELFIE_GEMINI_KEY_PRECHECK_SCRIPT="${OPENCLAW_SKILL_SELFIE_GEMINI_KEY_PRECHECK_SCRIPT:-$SCRIPT_DIR/selfie-gemini-key-precheck.sh}"
 CRON_PARTIAL_REPORT_PRECHECK_SCRIPT="${OPENCLAW_SKILL_CRON_PARTIAL_REPORT_PRECHECK_SCRIPT:-$SCRIPT_DIR/cron-partial-report-precheck.sh}"
+REPORT_SUMMARY_SCRIPT="${OPENCLAW_SKILL_REPORT_SUMMARY_SCRIPT:-$SCRIPT_DIR/extract-openclaw-update-report-summary.py}"
 
 # Stabilize automation runtime env: Codex/launchd may not inherit interactive shell proxy/path settings.
 OPENCLAW_SKILL_PROXY_ENV_ENABLED="${OPENCLAW_SKILL_PROXY_ENV_ENABLED:-1}"
@@ -80,7 +81,7 @@ Usage:
   run_openclaw_update_flow.sh <mode> [-- extra args]
 
 Modes:
-  monitor          Generate monitoring report (skip update + check latest version).
+  monitor          Run monitor first; auto-run full when latest_version is newer.
   stable           Run daily maintenance without remote update.
   full             Run real update + local patch chain.
   patch            Reapply unified local patches only.
@@ -125,6 +126,184 @@ exec_with_extra() {
   exec "${base[@]}"
 }
 
+run_with_extra_capture() {
+  local __out_var="$1"
+  shift
+
+  local tmp_out
+  local cmd=("$@")
+  local code=0
+  local errexit_was_set=0
+  if [[ "$-" == *e* ]]; then
+    errexit_was_set=1
+  fi
+  tmp_out="$(mktemp -t openclaw-monitor.XXXXXX)"
+
+  set +e
+  if ((${#extra[@]} > 0)); then
+    "${cmd[@]}" "${extra[@]}" 2>&1 | tee "$tmp_out"
+    code=${PIPESTATUS[0]}
+  else
+    "${cmd[@]}" 2>&1 | tee "$tmp_out"
+    code=${PIPESTATUS[0]}
+  fi
+  if (( errexit_was_set == 1 )); then
+    set -e
+  else
+    set +e
+  fi
+
+  printf -v "$__out_var" '%s' "$(cat "$tmp_out")"
+  rm -f "$tmp_out" >/dev/null 2>&1 || true
+  return "$code"
+}
+
+extract_report_file_from_output() {
+  local output="$1"
+  local line
+  local report=""
+  while IFS= read -r line; do
+    case "$line" in
+      REPORT_FILE=*)
+        report="${line#REPORT_FILE=}"
+        ;;
+    esac
+  done <<< "$output"
+  report="${report//$'\r'/}"
+  printf '%s' "$report"
+}
+
+is_stable_version_tag() {
+  local tag="$1"
+  [[ "$tag" =~ ^v?[0-9]+([.][0-9]+)*$ ]]
+}
+
+version_gt() {
+  local latest="$1"
+  local current="$2"
+  python3 - "$latest" "$current" <<'PY'
+import re
+import sys
+
+latest = sys.argv[1].strip()
+current = sys.argv[2].strip()
+
+def parse(version: str):
+    if version.startswith("v"):
+        version = version[1:]
+    nums = [int(x) for x in re.findall(r"\d+", version)]
+    return tuple(nums)
+
+if parse(latest) > parse(current):
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+load_report_versions() {
+  local report_file="$1"
+  local parsed line key value
+  local before=""
+  local latest=""
+
+  if [[ ! -f "$REPORT_SUMMARY_SCRIPT" ]]; then
+    return 1
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! parsed="$(python3 "$REPORT_SUMMARY_SCRIPT" --report "$report_file" --format kv --field before_version --field latest_version 2>/dev/null)"; then
+    return 1
+  fi
+
+  while IFS= read -r line; do
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "$key" in
+      before_version)
+        before="$value"
+        ;;
+      latest_version)
+        latest="$value"
+        ;;
+    esac
+  done <<< "$parsed"
+
+  if [[ -z "$before" || -z "$latest" ]]; then
+    return 1
+  fi
+
+  MONITOR_BEFORE_VERSION="$before"
+  MONITOR_LATEST_VERSION="$latest"
+  return 0
+}
+
+run_monitor_then_optional_full() {
+  local monitor_auto_full
+  local monitor_output=""
+  local monitor_code=0
+  local report_file=""
+  local before_version=""
+  local latest_version=""
+
+  monitor_auto_full="${OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION:-1}"
+
+  require_file "$DAILY_SCRIPT"
+  run_proxy_precheck || return $?
+  export OPENCLAW_DAILY_UPDATE_CHECK_LATEST_ON_SKIP=1
+
+  set +e
+  run_with_extra_capture monitor_output bash "$DAILY_SCRIPT" --skip-update
+  monitor_code=$?
+  set -e
+
+  if (( monitor_code != 0 )); then
+    echo "[monitor-auto-full] skip auto full: monitor failed (exit=${monitor_code})" >&2
+    return "$monitor_code"
+  fi
+
+  if [[ "$monitor_auto_full" == "0" ]]; then
+    echo "[monitor-auto-full] skip auto full: disabled by OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION=0"
+    return 0
+  fi
+
+  report_file="$(extract_report_file_from_output "$monitor_output")"
+  if [[ -z "$report_file" ]]; then
+    echo "[monitor-auto-full] skip auto full: REPORT_FILE not found in monitor output"
+    return 0
+  fi
+  if [[ ! -f "$report_file" ]]; then
+    echo "[monitor-auto-full] skip auto full: report file missing: $report_file"
+    return 0
+  fi
+
+  if ! load_report_versions "$report_file"; then
+    echo "[monitor-auto-full] skip auto full: failed to parse before/latest version from report"
+    return 0
+  fi
+  before_version="$MONITOR_BEFORE_VERSION"
+  latest_version="$MONITOR_LATEST_VERSION"
+
+  if ! is_stable_version_tag "$before_version"; then
+    echo "[monitor-auto-full] skip auto full: before_version is not stable: $before_version"
+    return 0
+  fi
+  if ! is_stable_version_tag "$latest_version"; then
+    echo "[monitor-auto-full] skip auto full: latest_version is not stable: $latest_version"
+    return 0
+  fi
+
+  if version_gt "$latest_version" "$before_version"; then
+    echo "[monitor-auto-full] trigger full: latest_version ($latest_version) > before_version ($before_version)"
+    run_proxy_precheck || return $?
+    exec_with_extra bash "$DAILY_SCRIPT" --with-update
+  fi
+
+  echo "[monitor-auto-full] skip auto full: latest_version ($latest_version) is not newer than before_version ($before_version)"
+  return 0
+}
+
 case "$mode" in
   -h|--help|help)
     usage
@@ -135,10 +314,7 @@ case "$mode" in
     exec_with_extra bash "$DAILY_SCRIPT" --skip-update
     ;;
   monitor)
-    require_file "$DAILY_SCRIPT"
-    run_proxy_precheck || exit $?
-    export OPENCLAW_DAILY_UPDATE_CHECK_LATEST_ON_SKIP=1
-    exec_with_extra bash "$DAILY_SCRIPT" --skip-update
+    run_monitor_then_optional_full
     ;;
   full)
     require_file "$DAILY_SCRIPT"

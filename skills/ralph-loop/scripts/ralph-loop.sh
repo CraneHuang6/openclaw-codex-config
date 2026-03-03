@@ -228,6 +228,56 @@ def build_initial_state(tasks: list[dict], plan_abs: str, mode: str, max_lanes: 
     }
 
 
+def reconcile_tasks_with_plan(state: dict, tasks: list[dict]) -> list[str]:
+    old_map = {task["id"]: task for task in state.get("tasks", [])}
+    merged = []
+    changes: list[str] = []
+
+    for task in tasks:
+        old = old_map.get(task["id"])
+        if old is None:
+            merged.append(
+                {
+                    "id": task["id"],
+                    "title": task["title"],
+                    "line": task["line"],
+                    "depends": task.get("depends", []),
+                    "status": "completed" if task.get("checked") else "pending",
+                    "lane": None,
+                    "retries": 0,
+                    "source": task.get("source", ""),
+                }
+            )
+            changes.append(f"add {task['id']}")
+            continue
+
+        status = old.get("status", "pending")
+        if status not in {"pending", "claimed", "completed", "failed"}:
+            status = "pending"
+        if task.get("checked"):
+            status = "completed"
+
+        merged.append(
+            {
+                "id": task["id"],
+                "title": task["title"],
+                "line": task["line"],
+                "depends": task.get("depends", []),
+                "status": status,
+                "lane": old.get("lane") if status == "claimed" else None,
+                "retries": int(old.get("retries", 0)),
+                "source": task.get("source", ""),
+            }
+        )
+
+    removed = [task_id for task_id in old_map if task_id not in {task["id"] for task in tasks}]
+    for task_id in removed:
+        changes.append(f"drop {task_id}")
+
+    state["tasks"] = merged
+    return changes
+
+
 def atomic_write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
@@ -400,6 +450,8 @@ def main() -> int:
                 return 3
             state = json.loads(state_file.read_text(encoding="utf-8"))
             log_entries.append("resume state")
+            for change in reconcile_tasks_with_plan(state, tasks):
+                log_entries.append(f"reconcile {change}")
         else:
             state = build_initial_state(tasks, plan_abs, mode, max_lanes)
             log_entries.append("initialize state")

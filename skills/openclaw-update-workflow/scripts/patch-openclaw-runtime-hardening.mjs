@@ -150,6 +150,73 @@ function removeDuplicateNamedFunctionBlocks(source, functionNames) {
   return updated;
 }
 
+function patchGatewayChannelRestartDeferral(source) {
+  if (source.includes("const OPENCLAW_CHANNEL_RESTART_IDLE_POLL_MS = 500;")) {
+    return source;
+  }
+
+  const restartBlockStartAnchor =
+    'if (plan.restartChannels.size > 0) if (isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) || isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS)) params.logChannels.info("skipping channel reload (OPENCLAW_SKIP_CHANNELS=1 or OPENCLAW_SKIP_PROVIDERS=1)");';
+  const restartBlockStart = source.indexOf(restartBlockStartAnchor);
+  if (restartBlockStart === -1) {
+    return source;
+  }
+
+  const restartBlockTail = source.slice(restartBlockStart);
+  const restartBlockEndMatch = restartBlockTail.match(/\n[ \t]*setCommandLaneConcurrency\(CommandLane\.Cron,/m);
+  if (!restartBlockEndMatch || restartBlockEndMatch.index === undefined) {
+    throw new Error("Gateway reload restartChannels patch end anchor not found");
+  }
+  const restartBlockEnd = restartBlockStart + restartBlockEndMatch.index;
+
+  const replacement = `if (plan.restartChannels.size > 0) if (isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) || isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS)) params.logChannels.info("skipping channel reload (OPENCLAW_SKIP_CHANNELS=1 or OPENCLAW_SKIP_PROVIDERS=1)");
+\t\telse {
+\t\t\tconst OPENCLAW_CHANNEL_RESTART_IDLE_POLL_MS = 500;
+\t\t\tconst OPENCLAW_CHANNEL_RESTART_IDLE_MAX_WAIT_MS = 30000;
+\t\t\tconst readChannelRestartActiveCounts = () => {
+\t\t\t\tconst queueSize = getTotalQueueSize();
+\t\t\t\tconst pendingReplies = getTotalPendingReplies();
+\t\t\t\tconst embeddedRuns = getActiveEmbeddedRunCount();
+\t\t\t\treturn {
+\t\t\t\t\tqueueSize,
+\t\t\t\t\tpendingReplies,
+\t\t\t\t\tembeddedRuns,
+\t\t\t\t\ttotalActive: queueSize + pendingReplies + embeddedRuns
+\t\t\t\t};
+\t\t\t};
+\t\t\tconst waitForChannelRestartIdle = async (name) => {
+\t\t\t\tconst startedAt = Date.now();
+\t\t\t\tlet deferLogged = false;
+\t\t\t\twhile (true) {
+\t\t\t\t\tconst active = readChannelRestartActiveCounts();
+\t\t\t\t\tif (active.totalActive <= 0) {
+\t\t\t\t\t\tif (deferLogged) params.logChannels.info(\`channel reload proceed after idle wait (\${name}): queue=\${active.queueSize}, pendingReplies=\${active.pendingReplies}, embeddedRuns=\${active.embeddedRuns}\`);
+\t\t\t\t\t\treturn;
+\t\t\t\t\t}
+\t\t\t\t\tconst elapsedMs = Date.now() - startedAt;
+\t\t\t\t\tif (!deferLogged) {
+\t\t\t\t\t\tparams.logChannels.info(\`channel reload defer (\${name}): queue=\${active.queueSize}, pendingReplies=\${active.pendingReplies}, embeddedRuns=\${active.embeddedRuns}\`);
+\t\t\t\t\t\tdeferLogged = true;
+\t\t\t\t\t}
+\t\t\t\t\tif (elapsedMs >= OPENCLAW_CHANNEL_RESTART_IDLE_MAX_WAIT_MS) {
+\t\t\t\t\t\tparams.logChannels.warn(\`channel reload idle wait timeout (\${name}) after \${elapsedMs}ms: queue=\${active.queueSize}, pendingReplies=\${active.pendingReplies}, embeddedRuns=\${active.embeddedRuns}; forcing restart\`);
+\t\t\t\t\t\treturn;
+\t\t\t\t\t}
+\t\t\t\t\tawait new Promise((resolve) => setTimeout(resolve, OPENCLAW_CHANNEL_RESTART_IDLE_POLL_MS));
+\t\t\t\t}
+\t\t\t};
+\t\t\tconst restartChannel = async (name) => {
+\t\t\t\tawait waitForChannelRestartIdle(name);
+\t\t\t\tparams.logChannels.info(\`restarting \${name} channel\`);
+\t\t\t\tawait params.stopChannel(name);
+\t\t\t\tawait params.startChannel(name);
+\t\t\t};
+\t\t\tfor (const channel of plan.restartChannels) await restartChannel(channel);
+\t\t}`;
+
+  return `${source.slice(0, restartBlockStart)}${replacement}${source.slice(restartBlockEnd)}`;
+}
+
 export function patchGatewayCronSource(source) {
   const helper = `function deriveCronOutcomeFromRunResult(runResult, payloads, summary, outputText) {
   const metaErrorMessage =
@@ -740,7 +807,7 @@ if (reviewMemoryAfter?.changedAfterRun) {
     }
   }
 
-  return updated;
+  return patchGatewayChannelRestartDeferral(updated);
 }
 
 export function patchCronCliSource(source) {

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "plan_path": "/var/folders/bf/x0zpptzs76v_z05ys5wttdy40000gn/T/tmp.tEahDuLCKZ",
+  "mode": "parallel",
+  "max_lanes": 2,
+  "created_at": "2026-03-03T13:58:49Z",
+  "updated_at": "2026-03-03T13:58:49Z",
+  "status": "blocked",
+  "tasks": [
+    {
+      "id": "B-1",
+      "title": "First",
+      "line": 1,
+      "depends": [],
+      "status": "completed",
+      "lane": null,
+      "retries": 0,
+      "source": "**B-1** First [depends: none]"
+    },
+    {
+      "id": "B-2",
+      "title": "Second",
+      "line": 2,
+      "depends": [
+        "Z-404"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**B-2** Second [depends: Z-404]"
+    }
+  ]
+}

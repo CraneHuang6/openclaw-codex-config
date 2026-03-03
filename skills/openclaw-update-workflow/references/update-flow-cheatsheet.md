@@ -5,7 +5,11 @@
 ## 主入口
 
 ```bash
-# 每日巡检（自动化推荐；检查 latest_version + 生成报告，不执行真实升级）
+# 每日巡检（自动化推荐；先巡检，若有新版本则自动执行 full）
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh monitor
+
+# 每日巡检但禁用自动 full（仅巡检）
+OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION=0 \
 bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh monitor
 
 # 稳定维护（默认推荐）
@@ -26,7 +30,8 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 
 说明：
 - `monitor` 本质是 `daily-auto-update-local.sh --skip-update` + `OPENCLAW_DAILY_UPDATE_CHECK_LATEST_ON_SKIP=1`，会输出 `REPORT_FILE=...` 并在报告里写入 `latest_version`。
-- 建议 Codex 自动化使用 `monitor`，并在发现新版本时只提醒人工执行 `full`。
+- 默认会在 `monitor` 成功后判断 `latest_version` 与 `before_version`；当 `latest_version > before_version` 时自动衔接 `full`（真实升级 + 补丁链 + 自检）。
+- 可通过 `OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION=0` 关闭自动升级，仅保留巡检。
 
 ## Clash LAN 代理（自动化环境）
 

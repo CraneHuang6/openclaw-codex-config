@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "plan_path": "/Users/crane/.codex/skills/ralph-loop/references/examples/sample-plan.md",
+  "mode": "parallel",
+  "max_lanes": 3,
+  "created_at": "2026-03-03T13:58:48Z",
+  "updated_at": "2026-03-03T13:58:49Z",
+  "status": "active",
+  "tasks": [
+    {
+      "id": "US-000",
+      "title": "Baseline finished task",
+      "line": 3,
+      "depends": [],
+      "status": "completed",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-000** Baseline finished task [depends: none]"
+    },
+    {
+      "id": "US-001",
+      "title": "Set up orchestrator shell",
+      "line": 4,
+      "depends": [],
+      "status": "completed",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-001** Set up orchestrator shell [depends: none]"
+    },
+    {
+      "id": "US-002",
+      "title": "Build parser module",
+      "line": 5,
+      "depends": [
+        "US-001"
+      ],
+      "status": "claimed",
+      "lane": "lane-1",
+      "retries": 0,
+      "source": "**US-002** Build parser module [depends: US-001]"
+    },
+    {
+      "id": "US-003",
+      "title": "Add state store",
+      "line": 6,
+      "depends": [
+        "US-001"
+      ],
+      "status": "claimed",
+      "lane": "lane-2",
+      "retries": 0,
+      "source": "**US-003** Add state store [depends: US-001]"
+    },
+    {
+      "id": "US-004",
+      "title": "Add lock file behavior",
+      "line": 7,
+      "depends": [
+        "US-003"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-004** Add lock file behavior [depends: US-003]"
+    },
+    {
+      "id": "US-005",
+      "title": "Add dry-run path",
+      "line": 8,
+      "depends": [
+        "US-002",
+        "US-003"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-005** Add dry-run path [depends: US-002,US-003]"
+    },
+    {
+      "id": "US-006",
+      "title": "Add resume path",
+      "line": 9,
+      "depends": [
+        "US-003"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-006** Add resume path [depends: US-003]"
+    },
+    {
+      "id": "US-007",
+      "title": "Add gate checks",
+      "line": 10,
+      "depends": [
+        "US-001"
+      ],
+      "status": "claimed",
+      "lane": "lane-3",
+      "retries": 0,
+      "source": "**US-007** Add gate checks [depends: US-001]"
+    },
+    {
+      "id": "US-008",
+      "title": "Add dispatch planner",
+      "line": 11,
+      "depends": [
+        "US-002",
+        "US-004"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-008** Add dispatch planner [depends: US-002,US-004]"
+    },
+    {
+      "id": "US-009",
+      "title": "Add hybrid mode",
+      "line": 12,
+      "depends": [
+        "US-008"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-009** Add hybrid mode [depends: US-008]"
+    },
+    {
+      "id": "US-010",
+      "title": "Add serial mode",
+      "line": 13,
+      "depends": [
+        "US-008"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-010** Add serial mode [depends: US-008]"
+    },
+    {
+      "id": "US-011",
+      "title": "Add dispatch logs",
+      "line": 14,
+      "depends": [
+        "US-008"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-011** Add dispatch logs [depends: US-008]"
+    },
+    {
+      "id": "US-012",
+      "title": "Add blocked diagnostics",
+      "line": 15,
+      "depends": [
+        "US-008"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-012** Add blocked diagnostics [depends: US-008]"
+    },
+    {
+      "id": "US-013",
+      "title": "Add CLI help",
+      "line": 16,
+      "depends": [],
+      "status": "completed",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-013** Add CLI help [depends: none]"
+    },
+    {
+      "id": "US-014",
+      "title": "Add script tests",
+      "line": 17,
+      "depends": [
+        "US-005",
+        "US-006",
+        "US-011"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-014** Add script tests [depends: US-005,US-006,US-011]"
+    },
+    {
+      "id": "US-015",
+      "title": "Add parser strict checks",
+      "line": 18,
+      "depends": [
+        "US-002"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-015** Add parser strict checks [depends: US-002]"
+    },
+    {
+      "id": "US-016",
+      "title": "Add acceptance template",
+      "line": 19,
+      "depends": [
+        "US-013"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-016** Add acceptance template [depends: US-013]"
+    },
+    {
+      "id": "US-017",
+      "title": "Add workflow docs",
+      "line": 20,
+      "depends": [
+        "US-013"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-017** Add workflow docs [depends: US-013]"
+    },
+    {
+      "id": "US-018",
+      "title": "Add role attribution output",
+      "line": 21,
+      "depends": [
+        "US-011"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-018** Add role attribution output [depends: US-011]"
+    },
+    {
+      "id": "US-019",
+      "title": "Add final verification command set",
+      "line": 22,
+      "depends": [
+        "US-014",
+        "US-015"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-019** Add final verification command set [depends: US-014,US-015]"
+    },
+    {
+      "id": "US-020",
+      "title": "Final integration review",
+      "line": 23,
+      "depends": [
+        "US-018",
+        "US-019"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "**US-020** Final integration review [depends: US-018,US-019]"
+    },
+    {
+      "id": "T022",
+      "title": "Task without explicit ID should still parse",
+      "line": 24,
+      "depends": [
+        "US-013"
+      ],
+      "status": "pending",
+      "lane": null,
+      "retries": 0,
+      "source": "Task without explicit ID should still parse [depends: US-013]"
+    }
+  ]
+}

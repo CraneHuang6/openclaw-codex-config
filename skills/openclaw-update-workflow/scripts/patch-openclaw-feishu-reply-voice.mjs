@@ -46,7 +46,8 @@ const REPLY_VOICE_THINKING_OFF_MARKER = 'thinking: voiceModeEnabled ? "off" : un
 const REPLY_VOICE_FORCE_TTS_MARKER = "forceVoiceModeTts: voiceModeEnabled,";
 const REPLY_VOICE_TIMEOUT_OVERRIDE_LINE_MARKER =
   "timeoutOverrideSeconds: FEISHU_REPLY_TIMEOUT_OVERRIDE_SECONDS,";
-const REPLY_VOICE_DISABLE_BLOCK_STREAMING_MARKER = "disableBlockStreaming: true,";
+const REPLY_VOICE_DISABLE_BLOCK_STREAMING_EXPRESSION = "voiceModeEnabled ? true : undefined";
+const REPLY_VOICE_DISABLE_BLOCK_STREAMING_MARKER = `disableBlockStreaming: ${REPLY_VOICE_DISABLE_BLOCK_STREAMING_EXPRESSION},`;
 const REPLY_VOICE_CREATE_DISPATCHER_CALL_PATTERN = /createFeishuReplyDispatcher\s*\(\s*\{/g;
 const REPLY_VOICE_DISPATCH_CALL_PATTERN = /dispatchReplyFromConfig\s*\(\s*\{/g;
 const FEISHU_SLOW_REPLY_NOTICE_MS_REPLACEMENT = "const FEISHU_SLOW_REPLY_NOTICE_MS = 45_000;";
@@ -63,7 +64,7 @@ const PARSE_REPLY_VOICE_MARKER =
 const VOICE_MODE_TOGGLE_HELPER_MARKER =
   'function resolveVoiceModeToggleCommand(text: string): "on" | "off" | null {';
 const PARSE_REPLY_VOICE_INSERT_ANCHOR =
-  "function checkBotMentioned(event: FeishuMessageEvent, botOpenId?: string): boolean {";
+  "function checkBotMentioned(event: FeishuMessageEvent, botOpenId?: string";
 const REPLY_VOICE_CANDIDATE_MARKER = "const replyVoiceCommandCandidate = resolveReplyVoiceCommand(ctx.content);";
 const REPLY_VOICE_CANDIDATE_ANCHOR = 'const isGroup = ctx.chatType === "group";';
 const REPLY_VOICE_RUNTIME_STATE_MARKER =
@@ -127,6 +128,12 @@ const SLOW_REPLY_TIMER_GUARDED_CLEAR =
   "      if (slowReplyTimer) {\n        clearTimeout(slowReplyTimer);\n      }";
 const BROKEN_PARSE_JOIN_LITERAL_PATTERN = /return lines\.join\("\r?\n"\)\.trim\(\);/g;
 const FIXED_PARSE_JOIN_LITERAL = 'return lines.join("\\n").trim();';
+const REPLY_DISPATCHER_STREAMING_COUNTER_MARKER = "let streamingUpdateCount = 0;";
+const REPLY_DISPATCHER_STREAMING_COUNTER_RESET_MARKER = "streamingUpdateCount = 0;";
+const REPLY_DISPATCHER_ASSISTANT_START_MARKER =
+  "streaming warmup: onAssistantMessageStart (renderMode=card)";
+const REPLY_DISPATCHER_PARTIAL_WARMUP_MARKER = "streaming warmup: first partial";
+const REPLY_DISPATCHER_PARTIAL_UPDATE_MARKER = "streaming partial update #";
 
 const REPLY_VOICE_COMMAND_TEMPLATE = `const COMMAND_CORE = "生成语音";
 
@@ -1170,11 +1177,21 @@ function upsertDispatchReplyOptionsLine(lines, fallbackIndent) {
 
   const indent = match[1] ?? fallbackIndent;
   const expression = (match[2] ?? "replyOptions").trim();
-  if (expression.startsWith("{") && expression.includes("disableBlockStreaming")) {
-    return;
+  if (expression.startsWith("{")) {
+    if (expression.includes(`disableBlockStreaming: ${REPLY_VOICE_DISABLE_BLOCK_STREAMING_EXPRESSION}`)) {
+      return;
+    }
+    if (expression.includes("disableBlockStreaming:")) {
+      const normalizedExpression = expression.replace(
+        /disableBlockStreaming:\s*[^,}]+/,
+        `disableBlockStreaming: ${REPLY_VOICE_DISABLE_BLOCK_STREAMING_EXPRESSION}`,
+      );
+      lines[lineIndex] = `${indent}replyOptions: ${normalizedExpression},`;
+      return;
+    }
   }
 
-  lines[lineIndex] = `${indent}replyOptions: { ...${expression}, disableBlockStreaming: true },`;
+  lines[lineIndex] = `${indent}replyOptions: { ...${expression}, disableBlockStreaming: ${REPLY_VOICE_DISABLE_BLOCK_STREAMING_EXPRESSION} },`;
 }
 
 function upsertDispatchOptionLine(lines, { name, value, anchorNames, fallbackIndent }) {
@@ -1231,7 +1248,7 @@ function normalizeDispatchReplyOptionsBody(body) {
   });
   upsertDispatchOptionLine(lines, {
     name: "disableBlockStreaming",
-    value: "true",
+    value: REPLY_VOICE_DISABLE_BLOCK_STREAMING_EXPRESSION,
     anchorNames: [
       "thinking",
       "forceVoiceModeTts",
@@ -1325,6 +1342,128 @@ function upsertReplyVoiceDispatcherCreateOptions(source) {
     }
     match = callPattern.exec(updated);
   }
+
+  return updated;
+}
+
+export function patchFeishuReplyDispatcherSource(source) {
+  let updated = source;
+
+  if (!updated.includes("createReplyDispatcherWithTyping")) {
+    throw new Error("reply dispatcher patch anchor not found");
+  }
+
+  if (!updated.includes(REPLY_DISPATCHER_STREAMING_COUNTER_MARKER)) {
+    const streamingStartPromisePattern = /let\s+streamingStartPromise:[^;]+;/m;
+    if (!streamingStartPromisePattern.test(updated)) {
+      throw new Error("reply dispatcher streaming start promise anchor not found");
+    }
+    updated = updated.replace(
+      streamingStartPromisePattern,
+      "$&\n  let streamingUpdateCount = 0;",
+    );
+  }
+
+  if (
+    !updated.includes(REPLY_DISPATCHER_STREAMING_COUNTER_RESET_MARKER) &&
+    updated.includes('lastPartial = "";')
+  ) {
+    updated = updated.replace('lastPartial = "";', 'lastPartial = "";\n    streamingUpdateCount = 0;');
+  }
+
+  const onModelSelectedPattern = /^([ \t]*)onModelSelected:\s*prefixContext\.onModelSelected,\s*$/m;
+  const replyOptionsKeyPattern = /replyOptions:\s*\{/g;
+  let replyOptionsBodyStart = -1;
+  let replyOptionsCloseBraceIndex = -1;
+  let replyOptionsBody = "";
+  while (true) {
+    const keyMatch = replyOptionsKeyPattern.exec(updated);
+    if (!keyMatch) {
+      break;
+    }
+    const blockOpenBraceIndex = keyMatch.index + keyMatch[0].lastIndexOf("{");
+    const blockCloseBraceIndex = findMatchingBrace(updated, blockOpenBraceIndex);
+    if (blockCloseBraceIndex === -1) {
+      continue;
+    }
+    const bodyStart = blockOpenBraceIndex + 1;
+    const candidateBody = updated.slice(bodyStart, blockCloseBraceIndex);
+    if (!onModelSelectedPattern.test(candidateBody)) {
+      replyOptionsKeyPattern.lastIndex = blockCloseBraceIndex + 1;
+      continue;
+    }
+    replyOptionsBodyStart = bodyStart;
+    replyOptionsCloseBraceIndex = blockCloseBraceIndex;
+    replyOptionsBody = candidateBody;
+    break;
+  }
+
+  if (replyOptionsBodyStart === -1 || replyOptionsCloseBraceIndex === -1) {
+    throw new Error("reply dispatcher onModelSelected anchor not found");
+  }
+
+  const onModelSelectedMatch = replyOptionsBody.match(onModelSelectedPattern);
+  if (!onModelSelectedMatch) {
+    throw new Error("reply dispatcher onModelSelected anchor not found");
+  }
+  const optionIndent = onModelSelectedMatch[1] ?? "      ";
+  const i1 = `${optionIndent}  `;
+  const i2 = `${optionIndent}    `;
+  const i3 = `${optionIndent}      `;
+  const i4 = `${optionIndent}        `;
+  const i5 = `${optionIndent}          `;
+  const callbacksBlock = [
+    `${optionIndent}onAssistantMessageStart:`,
+    `${i1}streamingEnabled && renderMode === "card"`,
+    `${i2}? () => {`,
+    `${i3}params.runtime.log?.(`,
+    `${i4}\`feishu[\${account.accountId}] streaming warmup: onAssistantMessageStart (renderMode=card)\`,`,
+    `${i3});`,
+    `${i3}startStreaming();`,
+    `${i2}}`,
+    `${i2}: undefined,`,
+    `${optionIndent}onPartialReply: streamingEnabled`,
+    `${i1}? (payload: ReplyPayload) => {`,
+    `${i2}if (!payload.text || payload.text === lastPartial) {`,
+    `${i3}return;`,
+    `${i2}}`,
+    `${i2}if (`,
+    `${i3}!streamingStartPromise &&`,
+    `${i3}!streaming &&`,
+    `${i3}(renderMode === "card" || (renderMode === "auto" && shouldUseCard(payload.text)))`,
+    `${i2}) {`,
+    `${i3}params.runtime.log?.(`,
+    `${i4}\`feishu[\${account.accountId}] streaming warmup: first partial (renderMode=\${renderMode})\`,`,
+    `${i3});`,
+    `${i3}startStreaming();`,
+    `${i2}}`,
+    `${i2}lastPartial = payload.text;`,
+    `${i2}streamText = payload.text;`,
+    `${i2}partialUpdateQueue = partialUpdateQueue.then(async () => {`,
+    `${i3}if (streamingStartPromise) {`,
+    `${i4}await streamingStartPromise;`,
+    `${i3}}`,
+    `${i3}if (streaming?.isActive()) {`,
+    `${i4}await streaming.update(streamText);`,
+    `${i4}streamingUpdateCount += 1;`,
+    `${i4}params.runtime.log?.(`,
+    `${i5}\`feishu[\${account.accountId}] streaming partial update #\${streamingUpdateCount}\`,`,
+    `${i4});`,
+    `${i3}}`,
+    `${i2}});`,
+    `${i1}}`,
+    `${i1}: undefined,`,
+  ].join("\n");
+
+  const normalizedReplyOptionsBody = replyOptionsBody
+    .replace(/^[ \t]*onAssistantMessageStart:\s*[\s\S]*?\n[ \t]*: undefined,\s*\n?/m, "")
+    .replace(/^[ \t]*onPartialReply:\s*streamingEnabled[\s\S]*?\n[ \t]*: undefined,\s*\n?/m, "")
+    .replace(onModelSelectedPattern, (match) => `${match}\n${callbacksBlock}`)
+    .replace(/\n{3,}/g, "\n\n");
+
+  updated = `${updated.slice(0, replyOptionsBodyStart)}${normalizedReplyOptionsBody}${updated.slice(
+    replyOptionsCloseBraceIndex,
+  )}`;
 
   return updated;
 }
@@ -1561,18 +1700,22 @@ export async function applyPatchToTargetRoot({
   apply = false,
 } = {}) {
   const botPath = path.join(targetRoot, "bot.ts");
+  const replyDispatcherPath = path.join(targetRoot, "reply-dispatcher.ts");
   const replyVoiceCommandPath = path.join(targetRoot, "reply-voice-command.ts");
   const replyVoiceTtsPath = path.join(targetRoot, "reply-voice-tts.ts");
 
   const originalBot = await readFile(botPath, "utf8");
   const patchedBot = patchFeishuBotReplyVoiceSource(originalBot);
+  const originalReplyDispatcher = await readFile(replyDispatcherPath, "utf8");
+  const patchedReplyDispatcher = patchFeishuReplyDispatcherSource(originalReplyDispatcher);
   const originalReplyVoiceCommand = await readOptionalFile(replyVoiceCommandPath);
   const originalReplyVoiceTts = await readOptionalFile(replyVoiceTtsPath);
 
   const botChanged = patchedBot !== originalBot;
+  const replyDispatcherChanged = patchedReplyDispatcher !== originalReplyDispatcher;
   const replyVoiceCommandChanged = originalReplyVoiceCommand !== REPLY_VOICE_COMMAND_TEMPLATE;
   const replyVoiceTtsChanged = originalReplyVoiceTts !== REPLY_VOICE_TTS_TEMPLATE;
-  const changed = botChanged || replyVoiceCommandChanged || replyVoiceTtsChanged;
+  const changed = botChanged || replyDispatcherChanged || replyVoiceCommandChanged || replyVoiceTtsChanged;
 
   if (apply && changed) {
     if (botChanged) {
@@ -1580,6 +1723,13 @@ export async function applyPatchToTargetRoot({
         filePath: botPath,
         original: originalBot,
         next: patchedBot,
+      });
+    }
+    if (replyDispatcherChanged) {
+      await writeWithOptionalBackup({
+        filePath: replyDispatcherPath,
+        original: originalReplyDispatcher,
+        next: patchedReplyDispatcher,
       });
     }
     if (replyVoiceCommandChanged) {
@@ -1601,12 +1751,14 @@ export async function applyPatchToTargetRoot({
   return {
     targetRoot,
     botPath,
+    replyDispatcherPath,
     replyVoiceCommandPath,
     replyVoiceTtsPath,
     changed,
     apply,
     files: {
       botChanged,
+      replyDispatcherChanged,
       replyVoiceCommandChanged,
       replyVoiceTtsChanged,
     },
