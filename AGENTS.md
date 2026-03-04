@@ -16,8 +16,14 @@
 - Do not invent APIs, configurations, commands, file paths, or repository structure.
 - If uncertain, search the repository and cite the exact file/path you found before making changes.
 
+## Contract Precedence (SSOT)
+- `AGENTS.md` is the authoritative source for cross-role shared contracts: Gate model (A/B/C/D1/D2), checkpoint escalation policy, output/verdict contract, and depth governance.
+- `agents/*.toml` files define role-specific delta rules only and must not contradict `AGENTS.md`.
+- If wording drifts across files, follow `AGENTS.md` first and treat role files as incremental overlays.
+
 ## 2) Multi-agent + sub-agent discipline (hard rules)
 - Non-trivial tasks include but are not limited to code/config changes, debugging, refactors, releases, migrations, and complex reviews/audits/governance checks; they default to `multi-agent`.
+- Gate model is unchanged and fixed: Gate A (Investigation Evidence), Gate B (Approved Plan), Gate C (Implementation Artifact), Gate D1 (Verification Packet), Gate D2 (Final Acceptance Review).
 - Simple task exception: single-step lookup, brief explanation, or trivial command may stay single-thread until scope expands.
 - Main thread is always Orchestrator. It owns Role Plan creation, role assignment, gate control, convergence, integration order, and final summary.
 - Do not start investigation or implementation before a Role Plan exists. Missing Role Plan => `BLOCK: missing Role Plan`.
@@ -26,8 +32,10 @@
 
 - Investigation:
   - Start from a multi-root-cause assumption unless the task is truly simple.
-  - For non-trivial investigation, assign at least two Explorer lanes by default.
+  - For non-trivial investigation, start with one Explorer lane by default.
+  - Escalate to 2 or more Explorer lanes when at least one trigger appears: cross-subsystem scope, root cause not converged, conflicting evidence, or failed reproduction.
   - Each Explorer lane must be distinct (subsystem, evidence surface, or hypothesis lane).
+  - Orchestrator must maintain a `Root Cause Matrix` across lanes with relationship values limited to: `independent`, `overlapping`, `same`.
   - If multiple Explorer results converge to one root cause, Orchestrator must publish one unified root-cause statement and one unified repair plan before Gate B.
 
 - Execution:
@@ -61,6 +69,10 @@
 
 - Every gate-advancing message must begin with a `Role: <Orchestrator|Explorer|Worker|Reviewer|Tester|Monitor>` line.
 - When a gate-specific verdict line is required, that verdict line must appear immediately after the required `Role:` line.
+- Verdict string contract is exact and must be preserved:
+  - `Plan Verdict: PASS|FAIL`
+  - `Pre-Merge Verdict: PASS|FAIL`
+  - `Verdict: PASS|FAIL`
 
 ## 3) Change strategy (reduce failure modes)
 - Prefer small, reviewable diffs. Avoid large refactors unless explicitly requested.
@@ -86,9 +98,19 @@ For gate-bearing sub-agents, keep these 6 top-level sections mandatory:
 - Verification Commands
 - Role-specific fields must be embedded under these sections, not replace them.
 - Explorer Gate A fields belong inside `Evidence` and `Risks / Assumptions`.
-- Explorer must place `Gate A Status`, `Objective`, `Investigation Lane`, `Current vs Desired`, `Reproduction / Observation Steps`, `Root Cause Relationship`, and `Optional Plan Inputs` inside `Evidence` in that order.
+- Explorer must place `Gate A Status`, `Objective`, `Investigation Lane`, `Current vs Desired`, `Reproduction / Observation Steps`, `Root Cause Relationship`, `Root Cause Matrix (lane-level)`, and `Optional Plan Inputs` inside `Evidence` in that order.
 - Explorer must place `Constraints / Assumptions` inside `Risks / Assumptions`.
 - Worker and Tester must also include: Verification Results, Coverage Notes
+- For Gate B / Pre-Merge / Gate D2, Orchestrator must provide a standardized `Review Input Packet` before Reviewer starts. Packet fields:
+  1) Gate Target
+  2) Scope Target (Worker slice or integrated main snapshot)
+  3) Required Evidence Bundle
+  4) Acceptance Criteria
+  5) Verification Command Set
+  6) Root Cause Matrix (`independent|overlapping|same` per lane pair, or `single-lane`)
+- Reviewer must fail fast when required `Review Input Packet` fields are missing.
+- Gate B specific fail-fast: missing `Root Cause Matrix` => `Plan Verdict: FAIL`.
+- Pre-Merge may run in parallel across independent Worker slices; Gate D2 remains a final serial decision on the integrated main snapshot.
 
 ## 5) Commit policy
 - Do not assume `notify` or any auto-commit hook is enabled unless `~/.codex/config.toml` explicitly declares it.

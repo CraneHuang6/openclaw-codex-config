@@ -49,6 +49,8 @@ dns_precheck_sleep_seconds="${OPENCLAW_DAILY_UPDATE_DNS_PRECHECK_SLEEP_SECONDS:-
 gateway_self_heal_enabled="${OPENCLAW_DAILY_UPDATE_GATEWAY_SELF_HEAL:-1}"
 gateway_app_evict_enabled="${OPENCLAW_DAILY_UPDATE_GATEWAY_APP_EVICT:-1}"
 pairing_self_heal_enabled="${OPENCLAW_DAILY_UPDATE_PAIRING_SELF_HEAL:-1}"
+fast_preflight_enabled="${OPENCLAW_DAILY_UPDATE_FAST_PREFLIGHT:-1}"
+fast_preflight_strict="${OPENCLAW_DAILY_UPDATE_FAST_PREFLIGHT_STRICT:-1}"
 
 show_help() {
   cat <<'EOF'
@@ -85,6 +87,8 @@ Options:
   --disable-gateway-self-heal    Disable gateway restart self-heal for status/probe checks.
   --disable-gateway-app-evict    Disable app-evict phase during gateway self-heal.
   --disable-pairing-self-heal    Disable pairing-repair auto-approve self-heal.
+  --enable-fast-preflight        Enable parallel preflight (dns/deps/scripts) before apply pipeline (default).
+  --disable-fast-preflight       Disable parallel preflight.
   -h, --help                     Show this help message.
 EOF
 }
@@ -881,6 +885,14 @@ while (($#)); do
       pairing_self_heal_enabled=0
       shift
       ;;
+    --enable-fast-preflight)
+      fast_preflight_enabled=1
+      shift
+      ;;
+    --disable-fast-preflight)
+      fast_preflight_enabled=0
+      shift
+      ;;
     -h|--help)
       show_help
       exit 0
@@ -923,6 +935,15 @@ fi
 
 if [[ "$pairing_self_heal_enabled" != "0" && "$pairing_self_heal_enabled" != "1" ]]; then
   echo "OPENCLAW_DAILY_UPDATE_PAIRING_SELF_HEAL must be 0 or 1" >&2
+  exit 2
+fi
+
+if [[ "$fast_preflight_enabled" != "0" && "$fast_preflight_enabled" != "1" ]]; then
+  echo "OPENCLAW_DAILY_UPDATE_FAST_PREFLIGHT must be 0 or 1" >&2
+  exit 2
+fi
+if [[ "$fast_preflight_strict" != "0" && "$fast_preflight_strict" != "1" ]]; then
+  echo "OPENCLAW_DAILY_UPDATE_FAST_PREFLIGHT_STRICT must be 0 or 1" >&2
   exit 2
 fi
 
@@ -1059,6 +1080,8 @@ dns_precheck_status="skip"
 dns_precheck_out="dns precheck skipped"
 dns_precheck_exit=0
 skip_runtime_checks_reason=""
+first_error_class="none"
+result_domain="none"
 [[ -n "$net_debug_out" ]] || net_debug_out="net debug not collected"
 
 UPDATE_ATTEMPT_ARGS=()
@@ -1130,7 +1153,96 @@ fi
 
 LAST_UPDATE_OUT=""
 run_update_pipeline=true
-if [[ "$MODE_LABEL" == "with-update" ]]; then
+if [[ "$MODE_LABEL" == "with-update" && "$fast_preflight_enabled" == "1" ]]; then
+  fast_preflight_task_dir="$(mktemp -d -t openclaw-daily-preflight.XXXXXX)"
+  preflight_dns_file="$fast_preflight_task_dir/dns"
+  preflight_deps_file="$fast_preflight_task_dir/deps"
+  preflight_scripts_file="$fast_preflight_task_dir/scripts"
+
+  (
+    if command -v bash >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+      echo "PASS deps" > "$preflight_deps_file"
+      exit 0
+    fi
+    echo "FAIL deps" > "$preflight_deps_file"
+    exit 41
+  ) &
+  preflight_deps_pid=$!
+
+  (
+    missing=()
+    [[ -x "$update_script" ]] || missing+=("$update_script")
+    [[ -x "$snapshot_script" ]] || missing+=("$snapshot_script")
+    [[ -f "$config_path" ]] || missing+=("$config_path")
+    if ((${#missing[@]} == 0)); then
+      echo "PASS scripts" > "$preflight_scripts_file"
+      exit 0
+    fi
+    echo "FAIL scripts missing: ${missing[*]}" > "$preflight_scripts_file"
+    exit 42
+  ) &
+  preflight_scripts_pid=$!
+
+  (
+    dns_registry_for_check="$selected_registry"
+    if [[ -z "$dns_registry_for_check" ]]; then
+      first_retry_registry="$(pick_retry_registry "" || true)"
+      dns_registry_for_check="$first_retry_registry"
+    fi
+    if dns_out="$(run_dns_precheck "$dns_registry_for_check" 2>&1)"; then
+      printf 'PASS dns\nregistry=%s\n%s\n' "${dns_registry_for_check:-none}" "$dns_out" > "$preflight_dns_file"
+      exit 0
+    fi
+    printf 'FAIL dns\nregistry=%s\n%s\n' "${dns_registry_for_check:-none}" "$dns_out" > "$preflight_dns_file"
+    exit 43
+  ) &
+  preflight_dns_pid=$!
+
+  preflight_deps_code=0
+  preflight_scripts_code=0
+  preflight_dns_code=0
+  wait "$preflight_deps_pid" || preflight_deps_code=$?
+  wait "$preflight_scripts_pid" || preflight_scripts_code=$?
+  wait "$preflight_dns_pid" || preflight_dns_code=$?
+
+  preflight_deps_out="$(cat "$preflight_deps_file" 2>/dev/null || echo "FAIL deps unknown")"
+  preflight_scripts_out="$(cat "$preflight_scripts_file" 2>/dev/null || echo "FAIL scripts unknown")"
+  preflight_dns_out="$(cat "$preflight_dns_file" 2>/dev/null || echo "FAIL dns unknown")"
+
+  PATCH_OUT="${PATCH_OUT}
+### Fast preflight
+${preflight_deps_out}
+${preflight_scripts_out}
+${preflight_dns_out}
+"
+
+  if (( preflight_dns_code != 0 )); then
+    dns_precheck_status="fail"
+    dns_precheck_out="${preflight_dns_out}"
+    run_update_pipeline=false
+    update_exit=1
+    skip_runtime_checks_reason="dns precheck failed in fast preflight"
+    LAST_UPDATE_OUT="dns precheck failed in fast preflight"
+  elif (( preflight_deps_code != 0 || preflight_scripts_code != 0 )); then
+    run_update_pipeline=false
+    update_exit=1
+    if (( preflight_deps_code != 0 )); then
+      first_error_class="dependency_check"
+      result_domain="env"
+      skip_runtime_checks_reason="dependency preflight failed"
+      LAST_UPDATE_OUT="dependency preflight failed"
+    else
+      first_error_class="preflight_script_missing"
+      result_domain="env"
+      skip_runtime_checks_reason="script preflight failed"
+      LAST_UPDATE_OUT="script preflight failed"
+    fi
+  fi
+
+  rm -rf "$fast_preflight_task_dir" >/dev/null 2>&1 || true
+fi
+
+if [[ "$MODE_LABEL" == "with-update" && "$run_update_pipeline" == "true" ]]; then
   dns_registry_for_check="$selected_registry"
   if [[ -z "$dns_registry_for_check" ]]; then
     first_retry_registry="$(pick_retry_registry "" || true)"
@@ -1511,10 +1623,10 @@ if (( update_exit != 0 )) || [[ "$snapshot_status" == "fail" ]] || [[ "$dependen
   result_status="error"
 fi
 
-first_error_class="none"
-result_domain="none"
 if [[ "$result_status" != "ok" ]]; then
-  if [[ "$update_dns_failure_detected" == "yes" ]] || [[ "$skip_runtime_checks_reason" == *"dns"* ]]; then
+  if [[ "$first_error_class" != "none" && "$result_domain" != "none" ]]; then
+    :
+  elif [[ "$update_dns_failure_detected" == "yes" ]] || [[ "$skip_runtime_checks_reason" == *"dns"* ]]; then
     first_error_class="dns_network"
     result_domain="infra"
   elif [[ "$dependency_status" != "pass" ]]; then

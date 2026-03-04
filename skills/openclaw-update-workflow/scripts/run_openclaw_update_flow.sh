@@ -12,6 +12,8 @@ FEISHU_NO_REPLY_PRECHECK_SCRIPT="${OPENCLAW_SKILL_FEISHU_NO_REPLY_PRECHECK_SCRIP
 SELFIE_GEMINI_KEY_PRECHECK_SCRIPT="${OPENCLAW_SKILL_SELFIE_GEMINI_KEY_PRECHECK_SCRIPT:-$SCRIPT_DIR/selfie-gemini-key-precheck.sh}"
 CRON_PARTIAL_REPORT_PRECHECK_SCRIPT="${OPENCLAW_SKILL_CRON_PARTIAL_REPORT_PRECHECK_SCRIPT:-$SCRIPT_DIR/cron-partial-report-precheck.sh}"
 REPORT_SUMMARY_SCRIPT="${OPENCLAW_SKILL_REPORT_SUMMARY_SCRIPT:-$SCRIPT_DIR/extract-openclaw-update-report-summary.py}"
+FAST_PREFLIGHT_ENABLED="${OPENCLAW_SKILL_FAST_PREFLIGHT_ENABLED:-1}"
+FAST_PREFLIGHT_STRICT="${OPENCLAW_SKILL_FAST_PREFLIGHT_STRICT:-1}"
 
 # Stabilize automation runtime env: Codex/launchd may not inherit interactive shell proxy/path settings.
 OPENCLAW_SKILL_PROXY_ENV_ENABLED="${OPENCLAW_SKILL_PROXY_ENV_ENABLED:-1}"
@@ -58,6 +60,10 @@ run_proxy_precheck() {
   if [[ ! "$attempts" =~ ^[0-9]+$ ]] || (( attempts < 1 )); then
     attempts=2
   fi
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "[precheck] classify=env reason=curl unavailable" >&2
+    return 41
+  fi
   if [[ ! "$retry_delay" =~ ^[0-9]+$ ]]; then
     retry_delay=1
   fi
@@ -81,7 +87,7 @@ Usage:
   run_openclaw_update_flow.sh <mode> [-- extra args]
 
 Modes:
-  monitor          Run monitor first; auto-run full when latest_version is newer.
+  monitor          Run monitor first; auto full only when enabled and latest_version is newer.
   stable           Run daily maintenance without remote update.
   full             Run real update + local patch chain.
   patch            Reapply unified local patches only.
@@ -100,6 +106,103 @@ require_file() {
     echo "Missing required file: $f" >&2
     exit 2
   fi
+}
+
+is_enabled_flag() {
+  local v="$1"
+  [[ "$v" == "1" || "$v" == "true" || "$v" == "yes" || "$v" == "on" ]]
+}
+
+run_fast_preflight() {
+  local strict="$1"
+  local task_dir
+  task_dir="$(mktemp -d -t openclaw-preflight.XXXXXX)"
+
+  local proxy_file="$task_dir/proxy"
+  local deps_file="$task_dir/deps"
+  local scripts_file="$task_dir/scripts"
+
+  (
+    if run_proxy_precheck; then
+      echo "PASS proxy precheck" > "$proxy_file"
+      exit 0
+    fi
+    code=$?
+    echo "FAIL proxy precheck exit=$code" > "$proxy_file"
+    exit "$code"
+  ) &
+  local proxy_pid=$!
+
+  (
+    local missing=()
+    command -v bash >/dev/null 2>&1 || missing+=("bash")
+    command -v python3 >/dev/null 2>&1 || missing+=("python3")
+    command -v curl >/dev/null 2>&1 || missing+=("curl")
+    if ((${#missing[@]} == 0)); then
+      echo "PASS dependencies available" > "$deps_file"
+      exit 0
+    fi
+    echo "FAIL dependencies missing: ${missing[*]}" > "$deps_file"
+    exit 41
+  ) &
+  local deps_pid=$!
+
+  (
+    local required=(
+      "$DAILY_SCRIPT"
+      "$UNIFIED_PATCH_SCRIPT"
+      "$REPORT_SUMMARY_SCRIPT"
+    )
+    local missing=()
+    local f
+    for f in "${required[@]}"; do
+      if [[ ! -f "$f" ]]; then
+        missing+=("$f")
+      fi
+    done
+    if ((${#missing[@]} == 0)); then
+      echo "PASS required scripts present" > "$scripts_file"
+      exit 0
+    fi
+    echo "FAIL required scripts missing: ${missing[*]}" > "$scripts_file"
+    exit 42
+  ) &
+  local scripts_pid=$!
+
+  local proxy_code=0
+  local deps_code=0
+  local scripts_code=0
+
+  wait "$proxy_pid" || proxy_code=$?
+  wait "$deps_pid" || deps_code=$?
+  wait "$scripts_pid" || scripts_code=$?
+
+  local proxy_msg deps_msg scripts_msg
+  proxy_msg="$(cat "$proxy_file" 2>/dev/null || echo "FAIL proxy precheck unknown")"
+  deps_msg="$(cat "$deps_file" 2>/dev/null || echo "FAIL dependencies unknown")"
+  scripts_msg="$(cat "$scripts_file" 2>/dev/null || echo "FAIL scripts unknown")"
+
+  rm -rf "$task_dir" >/dev/null 2>&1 || true
+
+  echo "[fast-preflight] $proxy_msg"
+  echo "[fast-preflight] $deps_msg"
+  echo "[fast-preflight] $scripts_msg"
+
+  if (( proxy_code != 0 )); then
+    echo "[fast-preflight] classify=infra reason=proxy precheck failed" >&2
+    return "$proxy_code"
+  fi
+  if (( deps_code != 0 )); then
+    echo "[fast-preflight] classify=env reason=dependencies unavailable" >&2
+    return "$deps_code"
+  fi
+  if (( scripts_code != 0 )); then
+    echo "[fast-preflight] classify=env reason=required scripts missing" >&2
+    return "$scripts_code"
+  fi
+
+  echo "[fast-preflight] PASS"
+  return 0
 }
 
 if [[ $# -lt 1 ]]; then
@@ -247,10 +350,14 @@ run_monitor_then_optional_full() {
   local before_version=""
   local latest_version=""
 
-  monitor_auto_full="${OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION:-1}"
+  monitor_auto_full="${OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION:-0}"
 
-  require_file "$DAILY_SCRIPT"
-  run_proxy_precheck || return $?
+  if is_enabled_flag "$FAST_PREFLIGHT_ENABLED"; then
+    run_fast_preflight "$FAST_PREFLIGHT_STRICT" || return $?
+  else
+    require_file "$DAILY_SCRIPT"
+    run_proxy_precheck || return $?
+  fi
   export OPENCLAW_DAILY_UPDATE_CHECK_LATEST_ON_SKIP=1
 
   set +e
@@ -309,16 +416,24 @@ case "$mode" in
     usage
     ;;
   stable)
-    require_file "$DAILY_SCRIPT"
-    run_proxy_precheck || exit $?
+    if is_enabled_flag "$FAST_PREFLIGHT_ENABLED"; then
+      run_fast_preflight "$FAST_PREFLIGHT_STRICT" || exit $?
+    else
+      require_file "$DAILY_SCRIPT"
+      run_proxy_precheck || exit $?
+    fi
     exec_with_extra bash "$DAILY_SCRIPT" --skip-update
     ;;
   monitor)
     run_monitor_then_optional_full
     ;;
   full)
-    require_file "$DAILY_SCRIPT"
-    run_proxy_precheck || exit $?
+    if is_enabled_flag "$FAST_PREFLIGHT_ENABLED"; then
+      run_fast_preflight "$FAST_PREFLIGHT_STRICT" || exit $?
+    else
+      require_file "$DAILY_SCRIPT"
+      run_proxy_precheck || exit $?
+    fi
     exec_with_extra bash "$DAILY_SCRIPT" --with-update
     ;;
   patch)

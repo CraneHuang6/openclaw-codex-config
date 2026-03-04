@@ -312,8 +312,32 @@ rollback_mode() {
   echo "{\"ok\":true,\"mode\":\"rollback\",\"snapshotPath\":\"$snap_path\",\"restored\":$restored_count,\"restarted\":$restart_gateway}"
 }
 
+run_minimal_post_rollback_probes() {
+  local status_out status_code probe_out probe_code security_out security_code
+  set +e
+  status_out="$($openclaw_bin status --deep 2>&1)"
+  status_code=$?
+  probe_out="$($openclaw_bin gateway probe 2>&1)"
+  probe_code=$?
+  security_out="$($openclaw_bin security audit --deep 2>&1)"
+  security_code=$?
+  set -e
+
+  local result="pass"
+  if (( status_code != 0 || probe_code != 0 || security_code != 0 )); then
+    result="fail"
+  fi
+
+  echo "{\"ok\":$([[ \"$result\" == \"pass\" ]] && echo true || echo false),\"probe\":\"$result\",\"status_exit\":$status_code,\"probe_exit\":$probe_code,\"security_exit\":$security_code}"
+  if [[ "$result" != "pass" ]]; then
+    return 1
+  fi
+  return 0
+}
+
 if [[ "$mode" == "snapshot" ]]; then
   snapshot_mode
 else
   rollback_mode
+  run_minimal_post_rollback_probes
 fi

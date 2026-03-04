@@ -100,18 +100,33 @@ run_monitor() {
   : > "$full_args_file"
 
   set +e
-  run_out="$({
-    STUB_MONITOR_BEHAVIOR="$behavior" \
-    STUB_CALLS_FILE="$calls_file" \
-    STUB_REPORT_FILE="$report_file" \
-    STUB_FULL_COUNT_FILE="$full_count_file" \
-    STUB_FULL_ARGS_FILE="$full_args_file" \
-    STUB_FULL_EXIT_CODE="$full_exit" \
-    OPENCLAW_SKILL_PROXY_PRECHECK_ENABLED=0 \
-    OPENCLAW_SKILL_DAILY_SCRIPT="$stub_daily" \
-    OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION="$auto_full" \
-    bash "$RUNNER" monitor -- --feishu-target test-target
-  } 2>&1)"
+  if [[ "$auto_full" == "__UNSET__" ]]; then
+    run_out="$({
+      STUB_MONITOR_BEHAVIOR="$behavior" \
+      STUB_CALLS_FILE="$calls_file" \
+      STUB_REPORT_FILE="$report_file" \
+      STUB_FULL_COUNT_FILE="$full_count_file" \
+      STUB_FULL_ARGS_FILE="$full_args_file" \
+      STUB_FULL_EXIT_CODE="$full_exit" \
+      OPENCLAW_SKILL_PROXY_PRECHECK_ENABLED=0 \
+      OPENCLAW_SKILL_DAILY_SCRIPT="$stub_daily" \
+      env -u OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION \
+      bash "$RUNNER" monitor -- --feishu-target test-target
+    } 2>&1)"
+  else
+    run_out="$({
+      STUB_MONITOR_BEHAVIOR="$behavior" \
+      STUB_CALLS_FILE="$calls_file" \
+      STUB_REPORT_FILE="$report_file" \
+      STUB_FULL_COUNT_FILE="$full_count_file" \
+      STUB_FULL_ARGS_FILE="$full_args_file" \
+      STUB_FULL_EXIT_CODE="$full_exit" \
+      OPENCLAW_SKILL_PROXY_PRECHECK_ENABLED=0 \
+      OPENCLAW_SKILL_DAILY_SCRIPT="$stub_daily" \
+      OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION="$auto_full" \
+      bash "$RUNNER" monitor -- --feishu-target test-target
+    } 2>&1)"
+  fi
   run_code=$?
   set -e
 
@@ -129,6 +144,13 @@ scenario_triggers_full_when_new_version_detected() {
   [[ "$run_full_count" -eq 1 ]] || fail "expected full to run once, got $run_full_count"
   grep -Fq '[monitor-auto-full] trigger full:' <<<"$run_out" || fail "missing trigger log"
   grep -Fq -- '--feishu-target test-target' <<<"$run_full_args" || fail "extra args were not forwarded to full"
+}
+
+scenario_default_skips_full_when_env_unset() {
+  run_monitor "ok_new" "__UNSET__" "0"
+  [[ "$run_code" -eq 0 ]] || fail "expected exit 0 when env unset, got $run_code"
+  [[ "$run_full_count" -eq 0 ]] || fail "expected no full run when env unset, got $run_full_count"
+  grep -Fq '[monitor-auto-full] skip auto full: disabled by OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION=0' <<<"$run_out" || fail "missing default-disabled log"
 }
 
 scenario_skips_full_when_latest_not_newer() {
@@ -166,6 +188,7 @@ scenario_full_failure_propagates_exit_code() {
 }
 
 scenario_triggers_full_when_new_version_detected
+scenario_default_skips_full_when_env_unset
 scenario_skips_full_when_latest_not_newer
 scenario_skips_full_when_latest_unknown
 scenario_skips_full_when_toggle_disabled

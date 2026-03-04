@@ -32,6 +32,11 @@ assert_out_contains() {
   rg -q --fixed-strings "$needle" "$TMP_DIR/last.out" || fail "missing output: $needle"
 }
 
+make_dist_empty() {
+  local dist_dir="$1"
+  mkdir -p "$dist_dir"
+}
+
 make_dist_all_patched() {
   local dist_dir="$1"
   mkdir -p "$dist_dir"
@@ -163,9 +168,30 @@ scenario_all_jobs_detects_bad_job() {
   assert_out_contains "JOB_CHECK=job-good|pass|ok|stop|no partial-success signal detected"
 }
 
+scenario_all_jobs_fail_when_dist_missing() {
+  local td="$TMP_DIR/all-jobs-dist-missing"
+  local home="$td/home"
+  local runs_dir="$home/cron/runs"
+  local sessions="$home/agents/main/sessions"
+  local dist="$td/dist"
+
+  make_dist_empty "$dist"
+  mkdir -p "$runs_dir"
+
+  write_run_log_entry "$runs_dir/job-good.jsonl" "job-good" "1772244303000" "ok" "sid-good" "done"
+  write_session "$sessions" "sid-good" "stop" "0"
+
+  OPENCLAW_HOME="$home" OPENCLAW_CRON_PRECHECK_DIST_DIR="$dist" run_capture --all-jobs
+
+  assert_code 1
+  assert_out_contains "RESULT=fail"
+  assert_out_contains "REASON=runtime gateway files not found"
+}
+
 scenario_single_job_pass
 scenario_missing_session_warn_and_fail
 scenario_patch_marker_partial_should_fail
 scenario_all_jobs_detects_bad_job
+scenario_all_jobs_fail_when_dist_missing
 
 echo "[PASS] cron-partial-report-precheck tests"
