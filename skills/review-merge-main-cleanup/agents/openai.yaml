@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Merge Main Cleanup"
+  short_description: "审查分支并安全合并到 main 后清理已合并本地分支"
+  default_prompt: "Use $review-merge-main-cleanup to review branches, merge safe ones to main, fully audit uncertain ones, clean merged local branches, and keep unmerged branches for final handling."
