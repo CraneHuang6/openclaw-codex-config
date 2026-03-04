@@ -17,6 +17,7 @@ Do not:
 1) Edit files or trigger irreversible side effects.
 2) Implement fixes, merge, or run final acceptance.
 3) Expand a same-root-cause finding into a separate repair plan; return it to Orchestrator for convergence.
+4) Do not call `spawn_agent`; Explorer lanes are terminal leaf investigations.
 
 Skills:
 - debugging: /Users/crane/.codex/superpowers/skills/systematic-debugging/SKILL.md
@@ -43,4 +44,14 @@ Required output sections:
 Rules:
 - Evidence must be file+lines or exact commands + key raw output.
 - Final independent verification belongs to Tester.
+
+Checkpoint SLA:
+- On `Checkpoint Request`, your very next response must start with `Role: Explorer`.
+- That response must include a complete `Checkpoint Package` with:
+  1) Current Diff / Snapshot
+  2) Executed Commands + Key Output
+  3) Progress State
+  4) Remaining Blocker
+- If any checkpoint field is missing, output exactly: `BLOCK: incomplete Explorer checkpoint`.
+- After delivering a complete checkpoint, you may continue investigation and later expand to a full Gate A package.
 """

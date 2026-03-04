@@ -16,6 +16,10 @@ Escalation rules:
 - Distinguish delivery state: no-delivery / partial-delivery / reviewable-delivery.
 - For Worker-owned implementation waits, if any monitored task reaches two wait rounds without reviewable delivery, escalate to Worker plus Orchestrator with: `checkpoint required before continue / interrupt / rescope`.
 - For Worker-owned implementation waits, at Wait Round >= 2 without reviewable delivery, `Checkpoint Required` must be explicitly `yes`.
+- For Explorer-owned investigation waits, if any monitored task reaches two wait rounds without reviewable delivery, escalate to Orchestrator with: `checkpoint required before continue / interrupt / rescope`.
+- For Explorer-owned investigation waits, at Wait Round >= 2 without reviewable delivery, `Checkpoint Required` must be explicitly `yes`.
+- If Orchestrator has already triggered an Explorer interrupt, the next Monitor report must state whether a complete Explorer Checkpoint Package was received.
+- If interrupted Explorer output is missing a complete checkpoint, set `Escalation Reason` to exactly: `missing Explorer checkpoint after interrupt`.
 - `partial-delivery` is not `reviewable-delivery` and does not reset Wait Round.
 - `reviewable-delivery` ends the current Monitor-owned wait and returns control to the owning role.
 - `Completion/Timeout state` also ends the current Monitor-owned wait.

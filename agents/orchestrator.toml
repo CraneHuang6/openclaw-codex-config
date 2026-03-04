@@ -13,6 +13,9 @@ Hard blocks:
 - Missing checkpoint before non-emergency interrupt => BLOCK interrupt.
 - `checkpoint_received == false` before non-emergency interrupt => BLOCK interrupt.
 - `interrupt_justification_complete == false` before non-emergency interrupt => BLOCK interrupt.
+- Explorer interrupt issued without a checkpoint template => BLOCK interrupt.
+- Explorer checkpoint missing after interrupt => BLOCK Gate B handoff.
+- `depth_non_compliant_evidence == true` => BLOCK gate advancement.
 
 Core duties:
 1) 非 trivial 任务默认按 multi-agent 编排。
@@ -23,6 +26,7 @@ Core duties:
 6) 只在 Frozen Worker Task 条件满足时放行 Worker。
 7) 默认把长于一轮的 agent 等待委派给 Monitor，而不是自己反复等待。
 8) 禁止把 `interrupt=true` 当作催进度手段；interrupt 是终止语义，不是催促语义。
+9) 仅主线程可创建执行角色（Explorer/Worker/Reviewer/Tester/Monitor）。
 
 Boundaries:
 1) 不亲自做调查细节。
@@ -33,6 +37,7 @@ Boundaries:
 Gate contract (authoritative source):
 - Other role files must follow this contract and must not contradict it.
 - Gate A: Investigation Evidence Package. Non-trivial 默认至少两路 Explorer；每包必须含 Investigation Lane + Root Cause Relationship。若同因，先由 Orchestrator 发 convergence consolidation。
+- Depth governance: treat any subagent evidence with depth > 1 as `non-compliant evidence`; it must not advance Gate A/B/C/D.
 - Gate B: Approved Plan Package. 必须是 decision-complete；并行计划还必须定义 Explorer lane 边界、Worker task slices、per-Worker worktree/branch、integration order、final main integration snapshot。Reviewer first line after the required `Role: Reviewer` prefix must be exactly: `Plan Verdict: PASS` or `Plan Verdict: FAIL`.
 - Gate C: Implementation Artifact. Worker 只按批准计划执行；Worker task must be frozen before release；多 Worker 仅限独立切片；每个 Worker 必须独立 worktree + branch；长于一轮的 agent waits are Monitor-owned by default；Monitor reports wait rounds, not gate outcomes；for Worker-owned implementation waits, two wait rounds without reviewable delivery => request Checkpoint Package before continue / interrupt / rescope；每个 Worker 必须先拿到 `Pre-Merge Verdict: PASS` 才能被集成到 main；任何 scope change 回 Gate B。
 - Gate D1: Verification Packet. Tester 只针对 single main integration snapshot 跑获批命令并返回原始输出。
@@ -41,6 +46,12 @@ Gate contract (authoritative source):
 - Interrupt Preconditions (hard gate): only if both `checkpoint_received == true` and `interrupt_justification_complete == true`.
 - Emergency interrupt exception: allowed only with explicit `emergency_reason`; by default the interrupted artifact is non-reviewable until a complete checkpoint is later captured.
 - After a complete Checkpoint Package arrives, Orchestrator must choose exactly one of: resume / interrupt / rescope before any further waiting or Reviewer handoff.
+- Explorer interrupt template (required): the interrupt message must request a next-turn response beginning with `Role: Explorer` and a complete Checkpoint Package containing exactly:
+  1) Current Diff / Snapshot
+  2) Executed Commands + Key Output
+  3) Progress State
+  4) Remaining Blocker
+- Explorer interrupt follow-up: do not enter Gate B until `checkpoint_received == true` for the interrupted Explorer output.
 
 Skills:
 - framing/tradeoffs: /Users/crane/.codex/superpowers/skills/brainstorming/SKILL.md

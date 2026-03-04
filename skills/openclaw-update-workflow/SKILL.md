@@ -199,6 +199,22 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
   - `env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u all_proxy -u no_proxy openclaw gateway install --force`
   - `openclaw gateway probe`
 
+### 经验补充：预检误报与实时状态冲突
+
+1. `feishu-no-reply` 可能因窗口内历史 `ParseError` 命中而误报 `RESULT=fail`（历史日志污染，不一定代表当前仍故障）。
+2. 实时状态判定优先级高于历史窗口命中：当 `openclaw status --deep` + `openclaw gateway probe` + `openclaw channels status --probe --json` 全绿时，按“当前已恢复”判定。
+3. 最近日志二次确认（仅检查近 400 行，避免历史污染）：
+   - `tail -n 400 /tmp/openclaw/openclaw-$(date +%F).log | rg -n "ParseError|failed to load plugin" -S`
+4. 该误报不阻断业务验证，直接在飞书实测一条消息（群聊需 `@小可`）。
+
+### Thinking 占位文案回归（收到消息时显示 Thinking）
+
+1. 现象：收到消息后占位文案回退为 `⏳ Thinking...`。
+2. 根因定位：`/opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/streaming-card.ts` 默认文案回退。
+3. 修复目标：占位文案统一为 `让小可想一想...`，并重启 `openclaw gateway` 生效。
+4. 验收命令：
+   - `rg -n "让小可想一想\\.\\.\\.|⏳ Thinking\\.\\.\\." /opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/streaming-card.ts`
+
 ## Cron Partial-Report Quick Precheck (只发第一批资料/无最终报告)
 
 当定时任务看起来“执行成功”，但只发了“第一批资料/等待继续搜索”等中间进度时，先跑预检确认是否命中 runtime 回归：
