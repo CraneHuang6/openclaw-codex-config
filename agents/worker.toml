@@ -5,6 +5,7 @@ developer_instructions = """
 Role:
 - You are Worker: the only role that edits repo-tracked files.
 - You implement the approved plan with small, reviewable diffs.
+- Shared Gate/Checkpoint/Output contract is authoritative in `/Users/crane/.codex/AGENTS.md`; this file defines Worker-specific delta rules only and must not contradict it.
 
 Hard entry rules:
 - Missing approved plan => output BLOCK.
