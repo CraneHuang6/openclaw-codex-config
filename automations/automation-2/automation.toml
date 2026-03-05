@@ -1,0 +1,54 @@
+version = 1
+id = "automation-2"
+name = "每日更新开发工具"
+prompt = """你是本机自动化维护助手。按固定流程更新 3 项工具并输出结构化结果，不要跳步：
+0) 先设置可写缓存目录（避免沙箱权限失败）：
+- export HOMEBREW_CACHE=/tmp/homebrew-cache-automation2
+- export npm_config_cache=/tmp/npm-cache-automation2
+- mkdir -p "$HOMEBREW_CACHE" "$npm_config_cache"
+
+1) 记录更新前版本：
+- Codex CLI: `codex --version`
+- Codex App: 读取 `/Applications/Codex.app/Contents/Info.plist` 的 `CFBundleShortVersionString` 与 `CFBundleVersion`（用 `/usr/libexec/PlistBuddy`）
+- Claude Code CLI: `claude --version`
+
+2) 依次执行更新命令：
+- `./bin/brew upgrade codex`
+- Codex App 使用以下分支命令，避免“App 已存在但 cask 未接管”导致失败：
+  - `if ./bin/brew list --cask codex-app >/dev/null 2>&1; then ./bin/brew upgrade --cask codex-app; else ./bin/brew install --cask codex-app --adopt || ./bin/brew install --cask codex-app --force; fi`
+- Claude Code CLI：
+  - 先执行 `claude update`；若失败，再尝试 `claude install`
+  - 若输出包含 `Multiple installations found` / `npm-global-orphan` / `orphaned npm global package`，执行冲突处置：
+    a) 先尝试 `npm -g uninstall @anthropic-ai/claude-code && hash -r`
+    b) 再执行 `claude update`
+    c) 若 a) 出现 `EACCES`/`permission denied`，不要反复重试，直接标记“需人工提权”，并给出一次性命令：
+       `sudo npm -g uninstall @anthropic-ai/claude-code && hash -r && claude update && claude --version && which -a claude`
+
+3) 记录更新后版本（与步骤 1 同口径）。
+
+4) 对每一项（Codex CLI / Codex App / Claude Code CLI）都必须输出以下字段：
+- 状态（成功/失败）
+- 前版本
+- 后版本
+- 首个错误（成功则填“无”）
+- 下一步建议（成功可填“无”）
+- 状态判定口径补充：
+  - 若出现 warning，但最终输出含 `latest version is already installed` / `up to date` 且前后版本一致，判定为成功。
+  - 只有“阻断更新且无成功结论”才判定为失败。
+
+5) 网络策略固定为“直连失败即降级提示”：
+- 若出现 DNS/连接错误（如 ENOTFOUND、EAI_AGAIN、Could not resolve host、ECONNREFUSED、timed out、unreachable），不要配置代理、不要重试镜像。
+- 仅在出现上述网络错误时，补充两条排查结果摘要：
+  - `curl -I https://storage.googleapis.com`
+  - `npm view @anthropic-ai/claude-code version --cache "$npm_config_cache"`
+
+6) 输出格式固定：
+- 先输出三项结果表（每项一行：状态/前版本/后版本/首个错误/下一步建议）。
+- 再输出“网络降级排查摘要”（若未触发，写“未触发”）。
+- 最后输出“关键命令清单”（按执行顺序）。"""
+status = "ACTIVE"
+rrule = "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA,SU;BYHOUR=3;BYMINUTE=0"
+execution_environment = "local"
+cwds = ["/opt/homebrew", "/Applications"]
+created_at = 1772676018441
+updated_at = 1772681034000

@@ -16,6 +16,7 @@ description: Use when maintaining OpenClaw on this machine after version updates
 - 每日巡检，默认先检查最新版和本机健康状态；若显示有新版本则自动进入 `full` 升级链路。
 - 更新后出现 Feishu 无回复、gateway timeout、model 回退等问题。
 - Feishu 能收到文本但看不到语音/附件（常见日志：`Local media path is not under an allowed directory`）。
+- Feishu 对话里出现异常短回复 `NO`（尤其在 `dispatch complete (queuedFinal=false, replies=0)` 附近）。
 - 需要刷新 launchd 每日 4 点自动更新任务。
 
 ## Quick Start
@@ -214,6 +215,35 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 3. 修复目标：占位文案统一为 `让小可想一想...`，并重启 `openclaw gateway` 生效。
 4. 验收命令：
    - `rg -n "让小可想一想\\.\\.\\.|⏳ Thinking\\.\\.\\." /opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/streaming-card.ts`
+
+### 经验补充：飞书出现异常短回复 `NO`（静默前缀泄漏）
+
+1. 先按“静默前缀泄漏”判定，不要直接当作文本兜底：
+   - 关键特征是同一时间窗出现：
+   - `dispatch complete (queuedFinal=false, replies=0)`
+   - `streaming partial update #1`
+   - 且没有 `sent no-final fallback text`
+2. 先确认 runtime token 判定是否支持无下划线前缀碎片（`N` / `NO`）：
+   - `rg -n "function isSilentReplyPrefixText" /opt/homebrew/lib/node_modules/openclaw/dist/tokens-*.js -S`
+3. 若判定函数未覆盖 `N|NO`，按最小改动修复 `isSilentReplyPrefixText`：
+   - 仅对 `^[A-Z_]+$` 形态判定前缀，避免误伤自然语言。
+   - 明确完整 token（`NO_REPLY`）不走 prefix 分支（交给精确静默逻辑）。
+   - 允许无下划线短前缀（`N` / `NO`）命中 `NO_REPLY` 前缀。
+4. 修后立即回归（两份 chunk 都要过）：
+   - `node --input-type=module` 导入 `tokens-*.js`，校验：
+   - `N`/`NO` => `true`
+   - `NO_REPLY` => `false`
+   - 普通文本（如 `Hello`）=> `false`
+5. 若重启 gateway 时报 `Identifier 'deriveCronOutcomeFromRunResult' has already been declared`：
+   - 先在 `gateway-cli-*.js` 去重重复函数定义，并统一调用到同一签名。
+   - 再重启验证：`openclaw gateway restart` + `openclaw gateway status` + `nc -zv 127.0.0.1 18789`
+6. 若 gateway 恢复但 Feishu 仍无回复，继续查插件编译：
+   - `tail -n 200 /Users/crane/.openclaw/logs/gateway.err.log | rg -n "ParseError|SyntaxError|Unexpected token|Missing semicolon" -S`
+   - 优先修复 `extensions/feishu/src/*.ts` 语法错误，再重启。
+7. 最终验收口径：
+   - gateway `running` 且 `RPC probe: ok`
+   - Feishu 插件成功加载（日志可见 `feishu[default]: WebSocket client started`）
+   - 复现场景不再出现可见 `NO` 短回复
 
 ## Cron Partial-Report Quick Precheck (只发第一批资料/无最终报告)
 

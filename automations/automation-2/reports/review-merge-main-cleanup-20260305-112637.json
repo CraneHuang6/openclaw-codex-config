@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-03-05T11:26:37.971617",
+  "repository": "/opt/homebrew",
+  "base": "main",
+  "mode": "auto",
+  "cleanup_mode": "plan-only",
+  "isolation": "yes (reuse existing base worktree: /opt/homebrew)",
+  "run_token": "40fcb85fe398d6c5",
+  "target_scope": "branch-pattern:*",
+  "target_branches": [
+    "stable"
+  ],
+  "base_start_sha": "20aace27bbb9de8ff61e4e01bde5d142e93a4b89",
+  "base_end_sha": "20aace27bbb9de8ff61e4e01bde5d142e93a4b89",
+  "drift_detected": "no",
+  "approval_gate": {
+    "required": true,
+    "approval_file": "/tmp/automation-2-approvals-20260305-112637.json",
+    "loaded": "yes",
+    "parse_error": "",
+    "reviewer": "automation-2",
+    "approved_at": "2026-03-05T11:30:00+08:00"
+  },
+  "test_gate": {
+    "required": false,
+    "pre_test": "",
+    "post_test": "",
+    "pre_test_passed": "not-run"
+  },
+  "cleanup_confirmation": "plan-only",
+  "merged_branches": [],
+  "cleanup_candidates": [
+    "stable"
+  ],
+  "cleaned_branches": [],
+  "archive_refs": [],
+  "cleanup_failures": [],
+  "uncertain_branches": [],
+  "blocked_by_gate": [],
+  "preserved_unmerged_branches": [],
+  "warnings": [],
+  "gate_stop": {
+    "kind": "",
+    "reason": "",
+    "exit_code": 0
+  },
+  "report_markdown": "/Users/crane/.codex/automations/automation-2/reports/review-merge-main-cleanup-20260305-112637.md"
+}
