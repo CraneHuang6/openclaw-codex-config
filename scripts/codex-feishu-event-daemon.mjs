@@ -717,6 +717,26 @@ async function processRolloutFile(entry) {
 
         const n = fromRolloutResponseItem(obj.payload, s.threadId, s.turnId, s.cwd);
         if (!n) continue;
+        if (n.kind === "user_input") {
+          if (s.isSubagent === null) {
+            await log("INFO", `meta_hydrate_retry_on_user_input thread=${s.threadId} file=${path.basename(entry.path)}`);
+            await hydrateRolloutMeta(entry.path, entry.size, s, { force: true });
+          }
+          if (s.isSubagent === true) {
+            await log(
+              "INFO",
+              `skip user_input for subagent thread=${s.threadId} turn=${n.turnId || "-"} call=${n.callId || "-"} parent=${s.parentThreadId || "-"} depth=${s.spawnDepth ?? "-"}`,
+            );
+            continue;
+          }
+          if (s.isSubagent !== false) {
+            await log(
+              "WARN",
+              `meta_unknown for user_input, skipped thread=${s.threadId} turn=${n.turnId || "-"} call=${n.callId || "-"} file=${path.basename(entry.path)}`,
+            );
+            continue;
+          }
+        }
         await routeNotification(n, "rollout-response_item");
         continue;
       }
@@ -728,6 +748,26 @@ async function processRolloutFile(entry) {
       }
       const n = fromRolloutEvent(obj.payload, s.threadId, s.cwd);
       if (!n) continue;
+      if (n.kind === "user_input") {
+        if (s.isSubagent === null) {
+          await log("INFO", `meta_hydrate_retry_on_user_input thread=${s.threadId} file=${path.basename(entry.path)}`);
+          await hydrateRolloutMeta(entry.path, entry.size, s, { force: true });
+        }
+        if (s.isSubagent === true) {
+          await log(
+            "INFO",
+            `skip user_input for subagent thread=${s.threadId} turn=${n.turnId || "-"} call=${n.callId || "-"} parent=${s.parentThreadId || "-"} depth=${s.spawnDepth ?? "-"}`,
+          );
+          continue;
+        }
+        if (s.isSubagent !== false) {
+          await log(
+            "WARN",
+            `meta_unknown for user_input, skipped thread=${s.threadId} turn=${n.turnId || "-"} call=${n.callId || "-"} file=${path.basename(entry.path)}`,
+          );
+          continue;
+        }
+      }
 
       if (n.kind === "task_complete") {
         const completionTurnId = normalizeTurnId(n.turnId);
