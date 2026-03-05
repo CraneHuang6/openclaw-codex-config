@@ -1,5 +1,7 @@
 # Codex Global Rules (Common, Evidence-First)
 
+Canonical filename: `AGENTS.md` (uppercase).
+
 ## 0) Session bootstrap (hard rule)
 - When starting any conversation, explicitly invoke the skill: `using-superpowers`.
 - First response SHOULD include: 已启用技能`using-superpowers`
@@ -58,7 +60,7 @@
   - Non-emergency interrupt requires a complete Checkpoint Package first.
   - New evidence is absorbed by Orchestrator first; interrupt only if the current direction is proven wrong.
   - Checkpoint Package is the minimum reviewable interrupted-delivery artifact and must include:
-    - Current Diff / Snapshot
+    - Current Snapshot (Diff if any; read-only lanes use Diff: N/A)
     - Executed Commands + Key Output
     - Progress State
     - Remaining Blocker
@@ -117,8 +119,12 @@ For gate-bearing sub-agents, these 6 top-level sections are the mandatory baseli
 ## 5) Commit policy
 - Do not assume `notify` or any auto-commit hook is enabled unless `~/.codex/config.toml` explicitly declares it.
 - The authoritative rule is: commit is allowed only after Gate D2 final acceptance passes.
+- Auto commit for OpenClaw update workflow is allowed only when `OPENCLAW_SKILL_GATE_D2_VERDICT=PASS`.
+- OpenClaw auto commit scope is allowlist-only: `AGENTS.md` and `skills/openclaw-update-workflow/**` under `/Users/crane/.codex`.
+- If any dirty changes exist outside the allowlist, auto commit must skip (`fail-closed`) and report reason; it must not force commit.
 - If a hook is enabled later, its trigger timing and behavior must match the documented rule before claiming it is active.
 - Never commit sensitive files (for example `.env`, `.env.*`, key files). If blocked by git identity or conflicts, report the exact reason and next minimal step.
+- Never push without explicit human confirmation.
 
 ## 6) Preferences
 - OpenClaw’s Chinese name is “小可”, English name is “Claw”.

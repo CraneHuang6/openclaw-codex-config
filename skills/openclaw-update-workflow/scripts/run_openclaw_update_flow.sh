@@ -14,6 +14,9 @@ CRON_PARTIAL_REPORT_PRECHECK_SCRIPT="${OPENCLAW_SKILL_CRON_PARTIAL_REPORT_PRECHE
 REPORT_SUMMARY_SCRIPT="${OPENCLAW_SKILL_REPORT_SUMMARY_SCRIPT:-$SCRIPT_DIR/extract-openclaw-update-report-summary.py}"
 FAST_PREFLIGHT_ENABLED="${OPENCLAW_SKILL_FAST_PREFLIGHT_ENABLED:-1}"
 FAST_PREFLIGHT_STRICT="${OPENCLAW_SKILL_FAST_PREFLIGHT_STRICT:-1}"
+AUTO_COMMIT_SCRIPT="${OPENCLAW_SKILL_AUTO_COMMIT_SCRIPT:-$SCRIPT_DIR/auto_commit_guarded.sh}"
+AUTO_COMMIT_ENABLED="${OPENCLAW_SKILL_AUTO_COMMIT_ENABLED:-1}"
+GATE_D2_VERDICT="${OPENCLAW_SKILL_GATE_D2_VERDICT:-UNKNOWN}"
 
 # Stabilize automation runtime env: Codex/launchd may not inherit interactive shell proxy/path settings.
 OPENCLAW_SKILL_PROXY_ENV_ENABLED="${OPENCLAW_SKILL_PROXY_ENV_ENABLED:-1}"
@@ -126,10 +129,11 @@ run_fast_preflight() {
     if run_proxy_precheck; then
       echo "PASS proxy precheck" > "$proxy_file"
       exit 0
+    else
+      code=$?
+      echo "FAIL proxy precheck exit=$code" > "$proxy_file"
+      exit "$code"
     fi
-    code=$?
-    echo "FAIL proxy precheck exit=$code" > "$proxy_file"
-    exit "$code"
   ) &
   local proxy_pid=$!
 
@@ -221,12 +225,14 @@ if [[ $# -gt 0 ]]; then
   extra=("$@")
 fi
 
-exec_with_extra() {
+run_with_extra() {
   local base=("$@")
   if ((${#extra[@]} > 0)); then
-    exec "${base[@]}" "${extra[@]}"
+    "${base[@]}" "${extra[@]}"
+    return $?
   fi
-  exec "${base[@]}"
+  "${base[@]}"
+  return $?
 }
 
 run_with_extra_capture() {
@@ -404,45 +410,114 @@ run_monitor_then_optional_full() {
   if version_gt "$latest_version" "$before_version"; then
     echo "[monitor-auto-full] trigger full: latest_version ($latest_version) > before_version ($before_version)"
     run_proxy_precheck || return $?
-    exec_with_extra bash "$DAILY_SCRIPT" --with-update
+    run_with_extra bash "$DAILY_SCRIPT" --with-update
+    return $?
   fi
 
   echo "[monitor-auto-full] skip auto full: latest_version ($latest_version) is not newer than before_version ($before_version)"
   return 0
 }
 
+is_auto_commit_mode() {
+  local m="$1"
+  [[ "$m" == "monitor" || "$m" == "stable" || "$m" == "full" || "$m" == "patch" ]]
+}
+
+run_auto_commit_if_needed() {
+  local completed_mode="$1"
+  local gate_verdict_upper=""
+
+  if [[ -z "$completed_mode" ]]; then
+    return 0
+  fi
+  if ! is_auto_commit_mode "$completed_mode"; then
+    return 0
+  fi
+
+  if ! is_enabled_flag "$AUTO_COMMIT_ENABLED"; then
+    echo "AUTO_COMMIT_RESULT=skipped"
+    echo "AUTO_COMMIT_REASON=disabled"
+    echo "AUTO_COMMIT_HASH="
+    echo "AUTO_COMMIT_FILES="
+    return 0
+  fi
+
+  gate_verdict_upper="$(printf '%s' "$GATE_D2_VERDICT" | tr '[:lower:]' '[:upper:]')"
+  if [[ "$gate_verdict_upper" != "PASS" ]]; then
+    echo "AUTO_COMMIT_RESULT=skipped"
+    echo "AUTO_COMMIT_REASON=gate_d2_not_pass"
+    echo "AUTO_COMMIT_HASH="
+    echo "AUTO_COMMIT_FILES="
+    return 0
+  fi
+
+  if [[ ! -x "$AUTO_COMMIT_SCRIPT" ]]; then
+    echo "AUTO_COMMIT_RESULT=skipped"
+    echo "AUTO_COMMIT_REASON=auto_commit_script_missing"
+    echo "AUTO_COMMIT_HASH="
+    echo "AUTO_COMMIT_FILES="
+    return 0
+  fi
+
+  local commit_output=""
+  local commit_code=0
+  set +e
+  commit_output="$(
+    OPENCLAW_SKILL_AUTO_COMMIT_MODE="$completed_mode" \
+    "$AUTO_COMMIT_SCRIPT" 2>&1
+  )"
+  commit_code=$?
+  set -e
+
+  if [[ -n "$commit_output" ]]; then
+    echo "$commit_output"
+  fi
+
+  if (( commit_code != 0 )); then
+    echo "[auto-commit] warning: guard script failed (exit=${commit_code})" >&2
+  fi
+  return 0
+}
+
+run_status=0
+completed_mode=""
 case "$mode" in
   -h|--help|help)
     usage
+    exit 0
     ;;
   stable)
+    completed_mode="stable"
     if is_enabled_flag "$FAST_PREFLIGHT_ENABLED"; then
       run_fast_preflight "$FAST_PREFLIGHT_STRICT" || exit $?
     else
       require_file "$DAILY_SCRIPT"
       run_proxy_precheck || exit $?
     fi
-    exec_with_extra bash "$DAILY_SCRIPT" --skip-update
+    run_with_extra bash "$DAILY_SCRIPT" --skip-update || run_status=$?
     ;;
   monitor)
-    run_monitor_then_optional_full
+    completed_mode="monitor"
+    run_monitor_then_optional_full || run_status=$?
     ;;
   full)
+    completed_mode="full"
     if is_enabled_flag "$FAST_PREFLIGHT_ENABLED"; then
       run_fast_preflight "$FAST_PREFLIGHT_STRICT" || exit $?
     else
       require_file "$DAILY_SCRIPT"
       run_proxy_precheck || exit $?
     fi
-    exec_with_extra bash "$DAILY_SCRIPT" --with-update
+    run_with_extra bash "$DAILY_SCRIPT" --with-update || run_status=$?
     ;;
   patch)
+    completed_mode="patch"
     require_file "$UNIFIED_PATCH_SCRIPT"
-    exec_with_extra bash "$UNIFIED_PATCH_SCRIPT" --skip-update --no-restart
+    run_with_extra bash "$UNIFIED_PATCH_SCRIPT" --skip-update --no-restart || run_status=$?
     ;;
   launchd-refresh)
     require_file "$LAUNCHD_SCRIPT"
-    exec_with_extra bash "$LAUNCHD_SCRIPT"
+    run_with_extra bash "$LAUNCHD_SCRIPT" || run_status=$?
     ;;
   doctor)
     if ! command -v openclaw >/dev/null 2>&1; then
@@ -455,19 +530,19 @@ case "$mode" in
     ;;
   voice-doctor)
     require_file "$VOICE_DOCTOR_SCRIPT"
-    exec_with_extra bash "$VOICE_DOCTOR_SCRIPT"
+    run_with_extra bash "$VOICE_DOCTOR_SCRIPT" || run_status=$?
     ;;
   feishu-no-reply)
     require_file "$FEISHU_NO_REPLY_PRECHECK_SCRIPT"
-    exec_with_extra bash "$FEISHU_NO_REPLY_PRECHECK_SCRIPT"
+    run_with_extra bash "$FEISHU_NO_REPLY_PRECHECK_SCRIPT" || run_status=$?
     ;;
   selfie-key-precheck)
     require_file "$SELFIE_GEMINI_KEY_PRECHECK_SCRIPT"
-    exec_with_extra bash "$SELFIE_GEMINI_KEY_PRECHECK_SCRIPT"
+    run_with_extra bash "$SELFIE_GEMINI_KEY_PRECHECK_SCRIPT" || run_status=$?
     ;;
   cron-partial-precheck)
     require_file "$CRON_PARTIAL_REPORT_PRECHECK_SCRIPT"
-    exec_with_extra bash "$CRON_PARTIAL_REPORT_PRECHECK_SCRIPT"
+    run_with_extra bash "$CRON_PARTIAL_REPORT_PRECHECK_SCRIPT" || run_status=$?
     ;;
   *)
     echo "Unknown mode: $mode" >&2
@@ -475,3 +550,9 @@ case "$mode" in
     exit 2
     ;;
 esac
+
+if (( run_status == 0 )); then
+  run_auto_commit_if_needed "$completed_mode"
+fi
+
+exit "$run_status"

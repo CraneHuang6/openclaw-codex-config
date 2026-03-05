@@ -33,6 +33,24 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 - 默认会在 `monitor` 成功后判断 `latest_version` 与 `before_version`；当 `latest_version > before_version` 时自动衔接 `full`（真实升级 + 补丁链 + 自检）。
 - 可通过 `OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION=0` 关闭自动升级，仅保留巡检。
 
+## Gate D2 自动提交（白名单）
+
+```bash
+# 开启 Gate D2 通过后的自动提交（默认 OPENCLAW_SKILL_AUTO_COMMIT_ENABLED=1）
+OPENCLAW_SKILL_GATE_D2_VERDICT=PASS \
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh stable
+
+# 显式关闭自动提交
+OPENCLAW_SKILL_AUTO_COMMIT_ENABLED=0 \
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh stable
+```
+
+说明：
+- 自动提交仅在 `OPENCLAW_SKILL_GATE_D2_VERDICT=PASS` 时触发。
+- 提交范围仅限 `AGENTS.md` 与 `skills/openclaw-update-workflow/**`。
+- 若存在白名单外改动，会输出 `AUTO_COMMIT_RESULT=skipped` + `AUTO_COMMIT_REASON=dirty_outside_allowlist`。
+- 常见日志键：`AUTO_COMMIT_RESULT`、`AUTO_COMMIT_REASON`、`AUTO_COMMIT_HASH`、`AUTO_COMMIT_FILES`。
+
 ## Clash LAN 代理（自动化环境）
 
 - 入口脚本支持按 `OPENCLAW_SKILL_HTTP_PROXY_HOST/PORT` 和 `OPENCLAW_SKILL_SOCKS_PROXY_PORT` 组装代理地址。
@@ -199,6 +217,29 @@ openclaw channels status --probe --json
 说明：
 - 若日志出现 `TypeError: (0 , _dedup.tryRecordMessagePersistent) is not a function`，说明消息已入站但处理阶段崩溃。
 - 群聊场景仍需满足现有策略（默认 `requireMention=true`，需 `@小可`）。
+
+## Feishu 长文本重复放大 + 人设漂移（联合排障）
+
+```bash
+# 1) 检查关键补丁 marker 是否在位
+rg -n "trimRunawayRepeatedSuffix|normalizeStreamingPartial|mergeStreamingText|applyPersonaGuard|personaMode" \
+  /opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/reply-dispatcher.ts \
+  /opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/streaming-card.ts \
+  /opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/bot.ts -S
+
+# 2) 重启 + 健康
+openclaw gateway restart
+openclaw status --deep
+
+# 3) 日志收敛验收
+rg -n "received message from|Started streaming|streaming partial update #|dispatch complete|Closed streaming|persona guard applied" \
+  /Users/crane/.openclaw/logs/gateway.log -S | tail -n 120
+```
+
+通过标准：
+- 不再出现 partial 持续放大且无 close。
+- 同一会话出现 `Closed streaming`。
+- 日常消息满足人设，技术消息保持技术例外。
 
 ## Cron 显示成功但只发第一批资料（半截报告）排障
 

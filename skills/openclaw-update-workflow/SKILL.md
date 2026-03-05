@@ -91,6 +91,28 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
    - 若出现 `pairing required`，优先确认报告里是否已触发 `approve-pairing-repair` 自动自愈；仅当请求非 `cli`/`gateway-client` repair 或 approve 失败时再人工介入
 4. 若失败，优先按 `references/update-flow-cheatsheet.md` 里的“单项补丁/排障命令”执行，不要直接改核心脚本。
 
+## Gate D2 自动提交（白名单）
+
+- 默认开启：`OPENCLAW_SKILL_AUTO_COMMIT_ENABLED=1`。
+- 仅当 `OPENCLAW_SKILL_GATE_D2_VERDICT=PASS` 时才会触发自动提交。
+- 自动提交固定在 `/Users/crane/.codex` 仓库执行，且仅允许以下路径：
+  - `AGENTS.md`
+  - `skills/openclaw-update-workflow/**`
+- 若存在白名单外脏改动，自动提交会直接跳过（fail-closed），不会强行提交。
+- 自动提交只做 `git commit`，不会 `git push`。
+
+可选变量：
+
+- `OPENCLAW_SKILL_AUTO_COMMIT_ENABLED=0`：关闭自动提交。
+- `OPENCLAW_SKILL_GATE_D2_VERDICT=PASS|FAIL|UNKNOWN`：门禁结论（默认 `UNKNOWN`）。
+
+运行后可在输出中检索以下字段：
+
+- `AUTO_COMMIT_RESULT=committed|skipped|failed`
+- `AUTO_COMMIT_REASON=ok|gate_d2_not_pass|dirty_outside_allowlist|no_changes|sensitive_file_detected|...`
+- `AUTO_COMMIT_HASH=<short_sha>`
+- `AUTO_COMMIT_FILES=<comma-separated paths>`
+
 ## Known Fixes Only
 
 - 自动修复仅允许命中已登记 signature（例如 `gateway_1006`、`missing_reply_voice_script`、`missing_dedup_persistent_export`、`didaapi_target_missing`、`dns_network`）。
@@ -244,6 +266,55 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
    - gateway `running` 且 `RPC probe: ok`
    - Feishu 插件成功加载（日志可见 `feishu[default]: WebSocket client started`）
    - 复现场景不再出现可见 `NO` 短回复
+
+## Feishu 长文本重复放大 + 人设漂移 联合排障
+
+适用现象：
+
+- 飞书长文本回复出现“段落循环放大”，`streaming partial update` 数量异常高（常见 >300）。
+- 重复问题修复后，回复又偏离 `IDENTITY/SOUL`（日常语气过技术化、缺少动作/喵收束）。
+
+关键实现面（运行时源码）：
+
+- `/opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/reply-dispatcher.ts`
+- `/opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/streaming-card.ts`
+- `/opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/bot.ts`
+
+建议校验 marker（先判“补丁是否在位”）：
+
+```bash
+rg -n "trimRunawayRepeatedSuffix|normalizeStreamingPartial|mergeStreamingText|applyPersonaGuard|personaMode" \
+  /opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/reply-dispatcher.ts \
+  /opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/streaming-card.ts \
+  /opt/homebrew/lib/node_modules/openclaw/extensions/feishu/src/bot.ts -S
+```
+
+重启与健康：
+
+```bash
+openclaw gateway restart
+openclaw status --deep
+```
+
+日志验收（先看链路收敛，不先看主观感受）：
+
+```bash
+rg -n "received message from|Started streaming|streaming partial update #|dispatch complete|Closed streaming|persona guard applied" \
+  /Users/crane/.openclaw/logs/gateway.log -S | tail -n 120
+```
+
+判定口径：
+
+1. 不再出现“持续放大不收敛”（例如 partial 计数异常冲高后仍无 close）。
+2. 同一会话能看到 `Closed streaming`，且时间上接近 `dispatch complete`。
+3. 回复文本不再暴露控制标记（如 `[[reply_to_current]]`）。
+4. 日常消息符合人设（动作开头 + 结尾喵收束 + 轻量陪伴句），技术消息保持技术风格不过度人设化。
+
+人工回归矩阵（建议一次性做完）：
+
+1. 日常闲聊 2 条：检查人设稳定性。
+2. 技术排障 2 条：检查技术例外是否生效。
+3. 长文本总结 1 条：检查“无循环放大 + 风格不漂移”。
 
 ## Cron Partial-Report Quick Precheck (只发第一批资料/无最终报告)
 
