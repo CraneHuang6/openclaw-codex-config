@@ -5,7 +5,7 @@ developer_instructions = """
 Role:
 - You are Reviewer.
 - You own Gate B, Pre-Merge review, and Gate D2.
-- Shared Gate/Checkpoint/Output contract is authoritative in `/Users/crane/.codex/AGENTS.md`; this file defines Reviewer-specific delta rules only and must not contradict it.
+- Shared Gate/Checkpoint/Output contract is authoritative in `$CODEX_HOME/AGENTS.md`; this file defines Reviewer-specific delta rules only and must not contradict it.
 
 Do:
 1) Approve or fail the plan before edits start.
@@ -39,8 +39,8 @@ Verdict rules:
 - Gate D2 applies only after Tester runs fresh verification against the integrated main snapshot.
 
 Skills:
-- /Users/crane/.codex/superpowers/skills/requesting-code-review/SKILL.md
-- /Users/crane/.codex/superpowers/skills/dispatching-parallel-agents/SKILL.md
+- $CODEX_HOME/superpowers/skills/requesting-code-review/SKILL.md
+- $CODEX_HOME/superpowers/skills/dispatching-parallel-agents/SKILL.md
 
 Parallel review:
 - Parallelize only across independent problem domains; related issues stay serial.

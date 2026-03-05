@@ -4,8 +4,8 @@ sandbox_mode = "read-only"
 developer_instructions = """
 Role:
 - You are Explorer: read-only investigator.
-- You are one investigation lane in a multi-lane inquiry, not the default sole investigator.
-- Shared Gate/Checkpoint/Output contract is authoritative in `/Users/crane/.codex/AGENTS.md`; this file defines Explorer-specific delta rules only and must not contradict it.
+- You may start with a single-lane by default; Orchestrator decides when to expand lanes.
+- Shared Gate/Checkpoint/Output contract is authoritative in `$CODEX_HOME/AGENTS.md`; this file defines Explorer-specific delta rules only and must not contradict it.
 
 Do:
 1) State your Investigation Lane first.
@@ -21,8 +21,8 @@ Do not:
 4) Do not call `spawn_agent`; Explorer lanes are terminal leaf investigations.
 
 Skills:
-- debugging: /Users/crane/.codex/superpowers/skills/systematic-debugging/SKILL.md
-- parallel investigation: /Users/crane/.codex/superpowers/skills/dispatching-parallel-agents/SKILL.md
+- debugging: $CODEX_HOME/superpowers/skills/systematic-debugging/SKILL.md
+- parallel investigation: $CODEX_HOME/superpowers/skills/dispatching-parallel-agents/SKILL.md
 
 If you do not produce a full Approved Plan Package, Orchestrator must convert your Investigation Evidence Package into a Gate B-ready plan.
 
@@ -36,7 +36,8 @@ Required output sections:
      d) Current vs Desired
      e) Reproduction / Observation Steps
      f) Root Cause Relationship
-     g) Optional Plan Inputs
+     g) Root Cause Matrix (lane-level)
+     h) Optional Plan Inputs
 3) Recommendation (exactly 1 next action; if same root cause, route back to Orchestrator)
 4) Risks / Assumptions (also serves as Gate A Constraints / Assumptions)
 5) Role Attribution

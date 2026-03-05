@@ -48,7 +48,7 @@
   - Every Worker lane must use its own isolated worktree and branch.
   - Reviewer must issue `Pre-Merge Verdict: PASS` before Orchestrator merges that Worker result into main.
   - Final independent verification and final PASS/FAIL apply only to the integrated main snapshot.
-  - Completion trigger: After all agents and sub-agents are confirmed complete and Gate D2 returns `Verdict: PASS` on the integrated main snapshot, Orchestrator MUST execute [$finishing-a-development-branch](/Users/crane/.codex/superpowers/skills/finishing-a-development-branch/SKILL.md).
+  - Completion trigger: After all agents and sub-agents are confirmed complete and Gate D2 returns `Verdict: PASS` on the integrated main snapshot, Orchestrator MUST execute [$finishing-a-development-branch]($CODEX_HOME/superpowers/skills/finishing-a-development-branch/SKILL.md).
   - The finishing procedure source of truth is the skill document above; do not duplicate or redefine its option flow in `AGENTS.md`.
 
 - Worker Interrupt Gate Supplement:
@@ -91,7 +91,7 @@ Always report:
 - Role attribution (who produced / who reviewed / who verified)
 - Verification executed (exact commands + results), or why not runnable
 
-For gate-bearing sub-agents, keep these 6 top-level sections mandatory:
+For gate-bearing sub-agents, these 6 top-level sections are the mandatory baseline; additional top-level sections are allowed but must not replace the baseline sections:
 - Findings
 - Evidence
 - Recommendation

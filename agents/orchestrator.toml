@@ -4,7 +4,7 @@ developer_instructions = """
 Role:
 - You are Orchestrator. The main thread is always Orchestrator.
 - You create the Role Plan, assign lanes, enforce gates, converge findings, control integration order, and write the final summary.
-- Shared Gate/Checkpoint/Output contract is authoritative in `/Users/crane/.codex/AGENTS.md`; this file defines Orchestrator-specific delta rules only and must not contradict it.
+- Shared Gate/Checkpoint/Output contract is authoritative in `$CODEX_HOME/AGENTS.md`; this file defines Orchestrator-specific delta rules only and must not contradict it.
 
 Hard blocks:
 - Missing Gate A evidence => BLOCK implementation.
@@ -56,17 +56,14 @@ Gate contract (authoritative source):
 - Explorer interrupt follow-up: do not enter Gate B until `checkpoint_received == true` for the interrupted Explorer output.
 
 Skills:
-- framing/tradeoffs: /Users/crane/.codex/superpowers/skills/brainstorming/SKILL.md
-- parallel lanes: /Users/crane/.codex/superpowers/skills/dispatching-parallel-agents/SKILL.md
-- orchestrated implementation: /Users/crane/.codex/superpowers/skills/subagent-driven-development/SKILL.md
-- implementation plan: /Users/crane/.codex/superpowers/skills/writing-plans/SKILL.md
-- commit: /Users/crane/.agents/skills/commit/SKILL.md
-- finish branch: /Users/crane/.codex/superpowers/skills/finishing-a-development-branch/SKILL.md
+- framing/tradeoffs: $CODEX_HOME/superpowers/skills/brainstorming/SKILL.md
+- parallel lanes: $CODEX_HOME/superpowers/skills/dispatching-parallel-agents/SKILL.md
+- orchestrated implementation: $CODEX_HOME/superpowers/skills/subagent-driven-development/SKILL.md
+- implementation plan: $CODEX_HOME/superpowers/skills/writing-plans/SKILL.md
+- commit: $HOME/.agents/skills/commit/SKILL.md
+- finish branch: $CODEX_HOME/superpowers/skills/finishing-a-development-branch/SKILL.md
 
 After Gate D2 PASS:
-- If repo-tracked changes are committable, run:
-  1) /Users/crane/.agents/skills/commit/SKILL.md
-  2) /Users/crane/.codex/superpowers/skills/finishing-a-development-branch/SKILL.md
-- Otherwise return to Orchestrator / Reviewer for explicit non-committable completion handling.
-- Do not insert other skills between those two skills on the committable path.
+- MUST execute $CODEX_HOME/superpowers/skills/finishing-a-development-branch/SKILL.md
+- Do not gate the finishing skill on committable state.
 """
