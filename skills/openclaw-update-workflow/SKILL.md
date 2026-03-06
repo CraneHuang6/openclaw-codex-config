@@ -435,6 +435,56 @@ rg -n "received message from|Started streaming|streaming partial update #|dispat
    - `~/.openclaw/openclaw.json` 中 `skills.entries.xiaoke-selfie.env.GEMINI_API_KEY` 是否存在且有效；
    - `xiaoke-selfie/scripts/xiaoke_selfie.py` 是否已包含“优先读 openclaw.json + 无效 key 自动重试备用 key”逻辑。
 
+## Feishu Reaction No-Reply Quick Fix（点赞后一直 thinking）
+
+当“点赞 reaction 能触发入站，但飞书侧一直 thinking 或最终无回复”时，按下面流程处理。
+
+### 症状与根因（本地已验证）
+
+1. 典型症状：
+   - 同一 reaction 事件出现 `dispatch complete (queuedFinal=false, replies=0)`。
+2. 历史伴随错误（已修复）：
+   - `streaming start failed ... 400`
+   - `Invalid ids: [om_xxx:reaction:THUMBSUP:...]`
+3. 根因拆分：
+   - `replyToMessageId` 错把 synthetic reaction message_id 当 open_message_id（无效）。
+   - reaction 语义文本过弱时，模型可能走 `NO_REPLY`（会表现成无 final）。
+
+### 固化修复基线（最小改动）
+
+1. synthetic event 必须补齐：
+   - `message.root_id = 被 reaction 的原始 messageId`
+   - 保留 `message.message_id = ...:reaction:...`（不改 dedup/日志语义）。
+2. 回复目标保持：
+   - `replyTargetMessageId = ctx.rootId ?? ctx.messageId`
+3. reaction 路径禁用 streaming + thinking：
+   - `disableStreaming: true`
+   - `thinking: "off"`
+4. partial 流中继续抑制 `NO_REPLY` 前缀碎片（避免出现 `NO`）。
+5. reaction synthetic 文本建议带明确指令：
+   - `Please acknowledge this reaction with a brief reply.`
+
+### 验收命令（固定）
+
+1. 抓最新 reaction 窗口（精确到单条事件）：
+   - `L=$(rg -n "messageId=.*:reaction:" /Users/crane/.openclaw/logs/gateway.log | tail -n 1 | cut -d: -f1)`
+   - `nl -ba /Users/crane/.openclaw/logs/gateway.log | sed -n "$((L-20)),$((L+30))p"`
+2. 核对三项通过标准：
+   - 有 `received message ...:reaction:... -> dispatching to agent -> dispatch complete (queuedFinal=true, replies=1)`。
+   - 无 `Invalid ids: [...:reaction:...]` 新增命中。
+   - 无 `streaming start failed ... 400` 新增命中。
+3. 错误日志回看：
+   - `rg -n "streaming start failed|Invalid ids" /Users/crane/.openclaw/logs/gateway.err.log /Users/crane/.openclaw/logs/gateway.log | tail -n 30`
+
+### 仍失败时的分流
+
+1. 若 `replies=0` 且无 `400`：
+   - 优先判为模型 `NO_REPLY` 路径，先增强 reaction synthetic 文本指令，再复测。
+2. 若仍出现 `400/Invalid ids`：
+   - 先检查运行时是否命中实际打包产物（`/tmp/openclaw/openclaw-*.log` 的 `_meta.path.fullFilePath`），避免只改 `src` 未生效。
+3. 若 `replies=1` 但 UI 仍显示 thinking：
+   - 转查 typing indicator 清理链路（`added/removed typing indicator reaction` 是否成对）。
+
 ## Common Commands
 
 ```bash

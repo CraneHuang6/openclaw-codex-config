@@ -214,3 +214,13 @@
 {"id":"019cc23c-519b-7c53-8cbd-f32175626c79","thread_name":"Audit RC-A RC-B change checklist","updated_at":"2026-03-06T08:21:12.945609Z"}
 {"id":"019cc259-806b-70f0-90cd-5a951d85a1ca","thread_name":"修复飞书reaction无响应问题拥","updated_at":"2026-03-06T08:53:31.666565Z"}
 {"id":"019cc25c-f264-78a3-ab61-fdac2edae618","thread_name":"Investigate openclaw Feishu reaction","updated_at":"2026-03-06T08:56:46.398403Z"}
+{"id":"019cc26b-1311-78e2-9000-f021258a0688","thread_name":"验证 bot.ts 运行文件状态是否忽略","updated_at":"2026-03-06T09:12:39.35737Z"}
+{"id":"019cc27a-1c63-7ac1-b66b-41bbee032374","thread_name":"Investigate Feishu like reaction log","updated_at":"2026-03-06T09:28:41.244994Z"}
+{"id":"019cc2ed-58ea-7dd0-a74f-e0791d7b1791","thread_name":"梳理运行时产物并补充 gitignore","updated_at":"2026-03-06T11:34:46.488068Z"}
+{"id":"019cc2f0-423f-70d3-b8bb-d25183f1a158","thread_name":"审查 .gitignore 忽略项合理性","updated_at":"2026-03-06T11:37:44.879618Z"}
+{"id":"019cc2f0-6b1b-70e1-b545-8ba9164d10ba","thread_name":"验证 .gitignore 新规则生效","updated_at":"2026-03-06T11:37:50.136794Z"}
+{"id":"019cc301-08e7-7091-b168-fd74c2b10034","thread_name":"Verify Feishu reasoning duplication","updated_at":"2026-03-06T11:56:06.215447Z"}
+{"id":"019cc301-358f-7c13-8a0b-229156ea49c8","thread_name":"已启用技能`using-superpowers","updated_at":"2026-03-06T11:56:19.447343Z"}
+{"id":"019cc33e-576b-7c23-adaf-154fda2f049b","thread_name":"已启用技能`using-superpowers` Add CAO inf","updated_at":"2026-03-06T13:03:23.321433Z"}
+{"id":"019cc340-6595-7862-894c-5a846acc42ed","thread_name":"检查smoke_test.sh脚本问题","updated_at":"2026-03-06T13:05:12.593358Z"}
+{"id":"019cc340-6b32-7db0-a0c0-076ba58554f9","thread_name":"Review logs for Codex B lane","updated_at":"2026-03-06T13:05:20.791067Z"}
