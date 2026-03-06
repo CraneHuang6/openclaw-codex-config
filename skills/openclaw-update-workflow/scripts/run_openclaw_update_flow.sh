@@ -4,8 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
-DAILY_SCRIPT="${OPENCLAW_SKILL_DAILY_SCRIPT:-$SCRIPT_DIR/daily-auto-update-local.sh}"
-UNIFIED_PATCH_SCRIPT="${OPENCLAW_SKILL_UNIFIED_PATCH_SCRIPT:-$SCRIPT_DIR/update-openclaw-with-feishu-repatch.sh}"
+DAILY_SCRIPT="${OPENCLAW_SKILL_DAILY_SCRIPT:-$OPENCLAW_HOME/scripts/daily-auto-update-local.sh}"
+UNIFIED_PATCH_SCRIPT="${OPENCLAW_SKILL_UNIFIED_PATCH_SCRIPT:-$OPENCLAW_HOME/scripts/update-openclaw-with-feishu-repatch.sh}"
 LAUNCHD_SCRIPT="${OPENCLAW_SKILL_LAUNCHD_SCRIPT:-$SCRIPT_DIR/install-daily-auto-update-launchd.sh}"
 VOICE_DOCTOR_SCRIPT="${OPENCLAW_SKILL_VOICE_DOCTOR_SCRIPT:-$SCRIPT_DIR/feishu-voice-doctor.sh}"
 FEISHU_NO_REPLY_PRECHECK_SCRIPT="${OPENCLAW_SKILL_FEISHU_NO_REPLY_PRECHECK_SCRIPT:-$SCRIPT_DIR/feishu-no-reply-precheck.sh}"

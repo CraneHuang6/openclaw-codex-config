@@ -200,6 +200,24 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 # B: monitor 最终为 "STATUS=ok"
 ```
 
+## monitor 报 `onModelSelected anchor not found` 快速处理（2026-03-05）
+
+```bash
+# 1) 确认 wrapper 默认是否已指向 ~/.openclaw/scripts（单一来源）
+rg -n 'DAILY_SCRIPT=.*OPENCLAW_HOME/scripts/daily-auto-update-local.sh|UNIFIED_PATCH_SCRIPT=.*OPENCLAW_HOME/scripts/update-openclaw-with-feishu-repatch.sh' \
+  /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh -S
+
+# 2) 跑 monitor，并读取最新 REPORT_FILE
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh monitor
+
+# 3) 若报告为：
+#    first_error_class=update_or_patch 且 status_deep/gateway_probe/security_audit=pass
+#    期望 status=warning（非致命，不触发系统异常通知）
+
+# 4) 若 first_error_class=gateway_probe 或出现 fallback availability check failed，
+#    转运行态故障路径，不按锚点误报处理
+```
+
 ## Feishu 能收到消息但无回复（Mac App 正常）排障
 
 ```bash
@@ -217,6 +235,31 @@ openclaw channels status --probe --json
 说明：
 - 若日志出现 `TypeError: (0 , _dedup.tryRecordMessagePersistent) is not a function`，说明消息已入站但处理阶段崩溃。
 - 群聊场景仍需满足现有策略（默认 `requireMention=true`，需 `@小可`）。
+
+### No-Reply RCA 固化顺序（2026-03-05）
+
+```bash
+# 1) 先确认 fallback 链只剩 qmcode/gpt-5.2
+jq -r '.agents.defaults.model.fallbacks' /Users/crane/.openclaw/openclaw.json
+
+# 2) 实时 probe（确认 fallback provider/model 可用性）
+openclaw models status --probe --probe-timeout 12000 --probe-concurrency 2 --json
+
+# 3) 守卫与日更脚本回归（防止 fallback 被更新脚本加回）
+bash /Users/crane/.openclaw/scripts/tests/enforce-openclaw-kimi-model.test.sh
+bash /Users/crane/.openclaw/scripts/tests/daily-auto-update-local.test.sh
+bash /Users/crane/.openclaw/scripts/tests/update-openclaw-with-feishu-repatch.test.sh
+
+# 4) Feishu 指标日志验收（发一条真实飞书消息后）
+rg -n "dispatch metrics|fallback metrics|no final reply queued|sent no-final fallback text" \
+  /Users/crane/.openclaw/logs/gateway.log | tail -n 50
+```
+
+要点：
+- 顺序固定为：`观测 -> fallback 收敛 -> retry/failover`，避免盲修。
+- fallback 可用性检查必须 fail-closed（非 `ok` 直接失败，不静默降级）。
+- 若定向跑 Feishu 单测，建议用：
+  - `OPENCLAW_FEISHU_DEDUP_STATE_FILE="$(mktemp /tmp/openclaw-feishu-dedup-test.XXXXXX.json)" pnpm dlx vitest run extensions/feishu/src/bot.test.ts -t "single-agent dispatch metrics and retry"`
 
 ## Feishu 长文本重复放大 + 人设漂移（联合排障）
 

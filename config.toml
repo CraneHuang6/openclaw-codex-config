@@ -1,7 +1,7 @@
 # Global contract note: cross-role Gate/Checkpoint/Output rules are authoritative in /Users/crane/.codex/AGENTS.md.
 # Agent role config files should be treated as role-specific delta overlays and must not contradict AGENTS.md.
 model_provider = "qmcode"
-model = "gpt-5.3-codex"
+model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 personality = "pragmatic"
 notify = ["bash", "/Users/crane/.codex/hooks/feishu-notify-on-turn.sh"]

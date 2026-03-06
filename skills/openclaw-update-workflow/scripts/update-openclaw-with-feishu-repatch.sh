@@ -14,9 +14,9 @@ DEFAULT_MEDIA_PATH_REPATCH_SCRIPT="${SELF_SCRIPT_DIR}/repatch-openclaw-feishu-me
 DEFAULT_NANO_BANANA_REPATCH_SCRIPT="${SELF_SCRIPT_DIR}/repatch-openclaw-nano-banana-model.sh"
 DEFAULT_RUNTIME_PATCH_SCRIPT="${SELF_SCRIPT_DIR}/patch-openclaw-runtime-hardening.mjs"
 DEFAULT_MODEL_GUARD_SCRIPT="${SELF_SCRIPT_DIR}/enforce-openclaw-kimi-model.sh"
-DEFAULT_MODEL_GUARD_PRIMARY_MODEL="qmcode/gpt-5.3-codex"
-DEFAULT_MODEL_GUARD_PRIMARY_ALIAS="GPT-5.3 Codex"
-DEFAULT_MODEL_GUARD_FALLBACK_MODELS=("qmcode/gpt-5.2" "openrouter/arcee-ai/trinity-large-preview:free")
+DEFAULT_MODEL_GUARD_PRIMARY_MODEL="qmcode/gpt-5.4"
+DEFAULT_MODEL_GUARD_PRIMARY_ALIAS="GPT-5.4"
+DEFAULT_MODEL_GUARD_FALLBACK_MODELS=("qmcode/gpt-5.2")
 DEFAULT_MEDIA_TRANSCRIBE_GUARD_SCRIPT="${SELF_SCRIPT_DIR}/enforce-openclaw-media-transcribe-bins.sh"
 DEFAULT_PLUGIN_SKILL_GUARD_SCRIPT="${SELF_SCRIPT_DIR}/enforce-openclaw-plugin-skill-deps.sh"
 DEFAULT_AUTH_PROFILES_GUARD_SCRIPT="${SELF_SCRIPT_DIR}/ensure-openclaw-auth-profiles.sh"
@@ -832,6 +832,14 @@ model_guard_args+=(
 for model_guard_fallback in "${DEFAULT_MODEL_GUARD_FALLBACK_MODELS[@]}"; do
   model_guard_args+=(--fallback-model "$model_guard_fallback")
 done
+if [[ "$dry_run" == "false" ]]; then
+  model_guard_args+=(
+    --verify-fallback-availability
+    --openclaw-bin "$openclaw_bin"
+    --probe-timeout-ms "${OPENCLAW_MODEL_GUARD_PROBE_TIMEOUT_MS:-12000}"
+    --probe-concurrency "${OPENCLAW_MODEL_GUARD_PROBE_CONCURRENCY:-2}"
+  )
+fi
 
 if [[ -n "$target_file" ]]; then
   account_args+=(--target-file "$target_file")

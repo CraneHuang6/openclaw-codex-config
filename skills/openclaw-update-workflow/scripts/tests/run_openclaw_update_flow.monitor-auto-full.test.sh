@@ -11,6 +11,9 @@ fail() {
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
+grep -Fq 'DAILY_SCRIPT="${OPENCLAW_SKILL_DAILY_SCRIPT:-$OPENCLAW_HOME/scripts/daily-auto-update-local.sh}"' "$RUNNER" || fail "runner default DAILY_SCRIPT must point to OPENCLAW_HOME/scripts"
+grep -Fq 'UNIFIED_PATCH_SCRIPT="${OPENCLAW_SKILL_UNIFIED_PATCH_SCRIPT:-$OPENCLAW_HOME/scripts/update-openclaw-with-feishu-repatch.sh}"' "$RUNNER" || fail "runner default UNIFIED_PATCH_SCRIPT must point to OPENCLAW_HOME/scripts"
+
 stub_daily="$tmp_dir/daily.sh"
 cat >"$stub_daily" <<'STUB'
 #!/usr/bin/env bash

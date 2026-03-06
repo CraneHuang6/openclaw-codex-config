@@ -139,6 +139,21 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
   - A 输出不包含 `helper anchor not found`
   - B 输出包含 `STATUS=ok`
 
+## 2026.3.5 经验沉淀（monitor/onModelSelected 误报）
+
+- 现象：`monitor` 报 `reply dispatcher onModelSelected anchor not found`，但 `status_deep/gateway/security` 本体可能仍健康。
+- 根因：Codex 技能副本 patcher 与运行时源码结构漂移（旧锚点 `onModelSelected: prefixContext.onModelSelected,` 不再匹配回调块写法）。
+- 固化策略（已落地）：
+  - `run_openclaw_update_flow.sh` 默认走 `OPENCLAW_HOME/scripts`（单一来源），不再默认走技能目录副本脚本。
+  - 仅 `skip-update` 下，若 `first_error_class=update_or_patch` 且 `status_deep/gateway_probe/security_audit=pass`，降级 `status=warning`（退出码 0）。
+  - `openclaw-daily-inspect-cron.sh` 将 `status=warning` 视为健康，不触发“系统异常”通知。
+- 验收命令（固定）：
+  - `bash /Users/crane/.openclaw/scripts/tests/daily-auto-update-local.test.sh`
+  - `bash /Users/crane/.openclaw/scripts/tests/openclaw-daily-inspect-cron.test.sh`
+  - `bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/tests/run_openclaw_update_flow.monitor-auto-full.test.sh`
+- 判定补充：
+  - 若 `monitor` 失败分类是 `gateway_probe` 或 `fallback availability check failed`，按运行态故障处理，不归因于本条锚点误报。
+
 ## Feishu Media Quick Fix
 
 当出现“文本能发、语音/附件看不到”时，按这个最短链路处理：
@@ -229,6 +244,44 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 3. 最近日志二次确认（仅检查近 400 行，避免历史污染）：
    - `tail -n 400 /tmp/openclaw/openclaw-$(date +%F).log | rg -n "ParseError|failed to load plugin" -S`
 4. 该误报不阻断业务验证，直接在飞书实测一条消息（群聊需 `@小可`）。
+
+### 2026-03-06 经验沉淀：6 步修复后以实时派发结果为准
+
+1. 固定执行顺序（不要跳步）：
+   - `patch -> restart -> probe -> channels status -> feishu-no-reply -> 飞书实测`
+2. 判定口径：
+   - 即使 `feishu-no-reply` 返回 `fail`，只要同时间窗真实消息满足 `received -> dispatching -> dispatch complete (queuedFinal=true, replies>=1)`，且未出现 `queuedFinal=false,replies=0`，按“当前已恢复”处理。
+3. 最小验收命令：
+   - `openclaw channels logs --channel feishu --lines 180`
+   - `rg -n "dispatch complete|queuedFinal=false|replies=0|no final reply queued|sent no-final fallback text" /tmp/openclaw/openclaw-$(date +%F).log -S | tail -n 60`
+   - 可选（按 messageId 精确定位）：`rg -n "<messageId>|dispatch complete|queuedFinal=false|replies=0" /tmp/openclaw/openclaw-$(date +%F).log -S`
+4. 风险说明：
+   - `feishu-no-reply` 的 `fail` 可能来自历史窗口命中旧 `ParseError`/`SyntaxError`，不应单独作为阻断条件。
+
+### 2026-03-05 经验沉淀：No-Reply 按固定顺序修（观测先行）
+
+1. 固定修复顺序（不要跳步）：
+   - 先补可观测性：恢复 per-message `dispatch/reply metrics`，补齐 `runId` 全链路关联。
+   - 再收敛模型回退：移除不可用 fallback，并把“默认值 + 日更脚本 + guard 脚本”一起改，避免被后续更新加回。
+   - 最后才做策略修复：仅在 `queuedFinal=false && finalCount=0` 时做一次受控 retry；retry 失败再走兜底文本。
+2. 必看日志字段（新口径）：
+   - `messageId,eventId,sessionKey,runId,provider,model,thinkLevel,queuedFinal,repliesFinal,repliesBlock,repliesTool,dispatchMs,totalMs,firstDeliverMs,firstFinalDeliverMs,fallbackTextSent`
+3. 模型路由收敛标准：
+   - `agents.defaults.model.fallbacks` 只保留 `qmcode/gpt-5.2`。
+   - `openrouter/arcee-ai/trinity-large-preview:free` 不参与 fallback（auth profile 可保留，不删）。
+4. fallback 可用性守卫（fail-closed）：
+   - `enforce-openclaw-kimi-model.sh` 在 `--verify-fallback-availability` 下必须执行 probe，并对 fallback 非 `ok` 直接失败。
+   - 解析 `openclaw models status --json` 时，禁止“pipe + here-doc 读 stdin”写法；统一改为 argv 传入完整 probe 输出再解析，避免误报 `probe output missing JSON payload`。
+5. 最小验收命令（与本次 RCA 对齐）：
+   - `jq -r '.agents.defaults.model.fallbacks' /Users/crane/.openclaw/openclaw.json`
+   - `openclaw models status --probe --probe-timeout 12000 --probe-concurrency 2 --json`
+   - `bash /Users/crane/.openclaw/scripts/tests/enforce-openclaw-kimi-model.test.sh`
+   - `bash /Users/crane/.openclaw/scripts/tests/daily-auto-update-local.test.sh`
+   - `bash /Users/crane/.openclaw/scripts/tests/update-openclaw-with-feishu-repatch.test.sh`
+6. Feishu 扩展定向单测注意项：
+   - 全局 `vitest` 命令不可用时，用 `pnpm dlx vitest ...`。
+   - `bot.test.ts` 定向回归前建议设置临时 dedup 文件，避免历史状态污染：
+   - `OPENCLAW_FEISHU_DEDUP_STATE_FILE="$(mktemp /tmp/openclaw-feishu-dedup-test.XXXXXX.json)" pnpm dlx vitest run extensions/feishu/src/bot.test.ts -t "single-agent dispatch metrics and retry"`
 
 ### Thinking 占位文案回归（收到消息时显示 Thinking）
 
@@ -432,7 +485,7 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 ## Guardrails
 
 - 不在技能内写入或回显密钥；认证信息仍通过既有环境变量流程注入。
-- 不手改 `openclaw.json` 中 model/fallback，依赖现有 guard 脚本兜底。
+- model/fallback 优先通过 guard 脚本收敛；若紧急止血临时手改 `openclaw.json`，必须在同批次同步 guard 默认与脚本测试，避免后续日更回灌。
 - 发生失败时先用已有 repatch/guard 脚本，不引入新的网络依赖或临时黑魔法。
 - 自动化只执行 `Known Fixes Only`；未知 bug 立即停止并转 inbox，不盲修。
 - 回滚一致性依赖 snapshot 覆盖 `redact-*.js` + `run-main-*.js`，不要在更新后单独替换 `entry.js` 而不重打 runtime 补丁。
