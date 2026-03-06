@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenClaw 模型升级同步"
+  short_description: "大模型升级后一次性同步 OpenClaw/Claude 模型配置与验证"
+  default_prompt: "Use $openclaw-model-upgrade-sync to scan, apply, and verify model version synchronization after a large model upgrade while preserving OpenClaw fallback policy."
