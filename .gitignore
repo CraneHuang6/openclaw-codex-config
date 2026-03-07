@@ -19,6 +19,7 @@ archived_sessions/
 sqlite/
 
 # Local workspace caches
+.worktrees/
 worktrees/
 vendor_imports/
 
