@@ -9,6 +9,8 @@ UNIFIED_PATCH_SCRIPT="${OPENCLAW_SKILL_UNIFIED_PATCH_SCRIPT:-$OPENCLAW_HOME/scri
 LAUNCHD_SCRIPT="${OPENCLAW_SKILL_LAUNCHD_SCRIPT:-$SCRIPT_DIR/install-daily-auto-update-launchd.sh}"
 VOICE_DOCTOR_SCRIPT="${OPENCLAW_SKILL_VOICE_DOCTOR_SCRIPT:-$SCRIPT_DIR/feishu-voice-doctor.sh}"
 FEISHU_NO_REPLY_PRECHECK_SCRIPT="${OPENCLAW_SKILL_FEISHU_NO_REPLY_PRECHECK_SCRIPT:-$SCRIPT_DIR/feishu-no-reply-precheck.sh}"
+FEISHU_SINGLE_CARD_STREAMING_SCRIPT="${OPENCLAW_SKILL_FEISHU_SINGLE_CARD_STREAMING_SCRIPT:-$SCRIPT_DIR/feishu-single-card-streaming.sh}"
+FEISHU_SINGLE_CARD_ACCEPTANCE_SCRIPT="${OPENCLAW_SKILL_FEISHU_SINGLE_CARD_ACCEPTANCE_SCRIPT:-$SCRIPT_DIR/feishu-single-card-acceptance.sh}"
 SELFIE_GEMINI_KEY_PRECHECK_SCRIPT="${OPENCLAW_SKILL_SELFIE_GEMINI_KEY_PRECHECK_SCRIPT:-$SCRIPT_DIR/selfie-gemini-key-precheck.sh}"
 CRON_PARTIAL_REPORT_PRECHECK_SCRIPT="${OPENCLAW_SKILL_CRON_PARTIAL_REPORT_PRECHECK_SCRIPT:-$SCRIPT_DIR/cron-partial-report-precheck.sh}"
 REPORT_SUMMARY_SCRIPT="${OPENCLAW_SKILL_REPORT_SUMMARY_SCRIPT:-$SCRIPT_DIR/extract-openclaw-update-report-summary.py}"
@@ -98,6 +100,8 @@ Modes:
   doctor           Run openclaw status/probe/security quick checks.
   voice-doctor     Check/fix Feishu voice default (wakaba + emotion routing).
   feishu-no-reply  Quick precheck for "Feishu message received but no reply".
+  feishu-single-card  Enforce single-card streaming config for Feishu (apply/verify/rollback).
+  feishu-single-card-accept  Validate one marker window: Started + Closed + replies=1.
   selfie-key-precheck  Validate xiaoke-selfie key precedence with forced invalid env key.
   cron-partial-precheck  Detect cron "status=ok but interim/partial output" regressions.
 EOF
@@ -535,6 +539,14 @@ case "$mode" in
   feishu-no-reply)
     require_file "$FEISHU_NO_REPLY_PRECHECK_SCRIPT"
     run_with_extra bash "$FEISHU_NO_REPLY_PRECHECK_SCRIPT" || run_status=$?
+    ;;
+  feishu-single-card)
+    require_file "$FEISHU_SINGLE_CARD_STREAMING_SCRIPT"
+    run_with_extra bash "$FEISHU_SINGLE_CARD_STREAMING_SCRIPT" || run_status=$?
+    ;;
+  feishu-single-card-accept)
+    require_file "$FEISHU_SINGLE_CARD_ACCEPTANCE_SCRIPT"
+    run_with_extra bash "$FEISHU_SINGLE_CARD_ACCEPTANCE_SCRIPT" || run_status=$?
     ;;
   selfie-key-precheck)
     require_file "$SELFIE_GEMINI_KEY_PRECHECK_SCRIPT"

@@ -224,3 +224,11 @@
 {"id":"019cc33e-576b-7c23-adaf-154fda2f049b","thread_name":"已启用技能`using-superpowers` Add CAO inf","updated_at":"2026-03-06T13:03:23.321433Z"}
 {"id":"019cc340-6595-7862-894c-5a846acc42ed","thread_name":"检查smoke_test.sh脚本问题","updated_at":"2026-03-06T13:05:12.593358Z"}
 {"id":"019cc340-6b32-7db0-a0c0-076ba58554f9","thread_name":"Review logs for Codex B lane","updated_at":"2026-03-06T13:05:20.791067Z"}
+{"id":"019cc3ae-c11a-7121-a26c-1e77d5e239ec","thread_name":"Reduce Feishu streaming chunks","updated_at":"2026-03-06T15:06:53.073715Z"}
+{"id":"019cc33e-576b-7c23-adaf-154fda2f049b","thread_name":"CAO","updated_at":"2026-03-06T15:17:37.969818Z"}
+{"id":"019cc3c9-995a-7bc0-af48-3da209f88bdc","thread_name":"Review openclaw update workflow","updated_at":"2026-03-06T15:35:03.458603Z"}
+{"id":"019cc3c9-c237-70c1-ac76-e3b1650e1f14","thread_name":"Verify feishu update workflow","updated_at":"2026-03-06T15:35:12.805486Z"}
+{"id":"019cc3d0-fb78-7ce3-9cac-0c77ca338fa7","thread_name":"调查切换GPT-5.4后仍调用5.3","updated_at":"2026-03-06T15:44:15.666428Z"}
+{"id":"019cc485-c5b0-7130-a21e-e6169847c113","thread_name":"Automate daily tool updates","updated_at":"2026-03-06T19:00:35.442655Z"}
+{"id":"019cc485-c5b0-7130-a21e-e62664a4e0da","thread_name":"Add daily OpenClaw backup","updated_at":"2026-03-06T19:00:43.270809Z"}
+{"id":"019cc5da-fbd2-7411-9225-20ccba592054","thread_name":"Summarize Feishu card repetition","updated_at":"2026-03-07T01:13:25.648357Z"}

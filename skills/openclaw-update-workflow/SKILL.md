@@ -38,6 +38,8 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 - `doctor`：快速健康检查（`status --deep` + `gateway probe` + `security audit --deep`）。
 - `voice-doctor`：语音链路专检（默认只检查，可加 `--apply` 自动修复默认音色与情绪路由）。
 - `feishu-no-reply`：飞书“收到消息但无回复”快速预检（通道健康 + 最近入站/派发标记 + 致命插件报错 + gateway launchd 代理环境/可达性快照）。
+- `feishu-single-card`：飞书单卡流式配置（`apply|verify|rollback`，避免流式回复被切成 20+ 条）。
+- `feishu-single-card-accept`：飞书单卡流式验收（按唯一标记抓取同一窗口，判定 `Started + Closed + replies=1`）。
 - `selfie-key-precheck`：自拍链路 Gemini Key 优先级预检（强制注入无效 `GEMINI_API_KEY`，验证仍可成功出图）。
 - `cron-partial-precheck`：Cron“状态显示成功但只输出中间进度”回归预检（检查 run 状态、session stopReason、runtime patch marker 覆盖率；支持 `--all-jobs` 全量扫描）。
 
@@ -369,6 +371,59 @@ rg -n "received message from|Started streaming|streaming partial update #|dispat
 2. 技术排障 2 条：检查技术例外是否生效。
 3. 长文本总结 1 条：检查“无循环放大 + 风格不漂移”。
 
+## Feishu 单卡流式防分片（20+ 条）
+
+适用现象：
+
+- 飞书在流式回复时被切成很多条（常见 20+）。
+- 重启/中断窗口里 `dispatch complete ... replies=<N>` 持续偏大。
+
+核心结论：
+
+- 在飞书卡片流式场景下，优先“单卡持续更新”，不需要块级分片。
+- 关键是关闭 `blockStreaming`，保留 `streaming=true` + `renderMode=card`。
+
+目标配置（`~/.openclaw/openclaw.json`）：
+
+- `channels.feishu.streaming=true`
+- `channels.feishu.blockStreaming=false`
+- `channels.feishu.renderMode="card"`
+- `channels.feishu.textChunkLimit=2000`
+- `channels.feishu.chunkMode="newline"`
+- `agents.defaults.blockStreamingDefault="off"`
+- `agents.defaults.blockStreamingBreak="message_end"`
+
+一键命令：
+
+1. 先校验当前状态：
+   - `bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh feishu-single-card -- verify`
+2. 应用单卡流式配置：
+   - `bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh feishu-single-card -- apply`
+3. 需要回滚时：
+   - `bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh feishu-single-card -- rollback`
+   - 或指定备份：`... -- rollback --backup <backup_path>`
+
+日志验收口径（固定）：
+
+```bash
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh \
+  feishu-single-card-accept -- --marker "[A2-23:59]" --chat-id oc_4f9389b28a8b716d80b16ad3de07be3d
+```
+
+通过标准：
+
+1. 验收脚本返回 `RESULT=pass` 且 `VERDICT=PASS`。
+2. 同一窗口内有 `Started streaming` + `Closed streaming`，且 `REPLIES=1`。
+3. 飞书界面表现为同一条卡片持续更新，而不是连续多条分片。
+
+补充说明（避免误判）：
+
+1. 必须先发送带唯一标记的长消息（建议 `>3000` 字，前缀如 `[A2-时分秒]`），再执行验收命令。
+2. 日志中本地探测 `action=send` 与 `health-monitor stale-socket` 重启噪声不计入验收。
+3. 若结果是 `REASON=replies_not_one`，先执行：
+   - `bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh feishu-single-card -- verify`
+   - 再确认 `gateway.log` 存在 `config hot reload applied (channels.feishu.blockStreaming, channels.feishu.chunkMode, channels.feishu.textChunkLimit)`。
+
 ## Cron Partial-Report Quick Precheck (只发第一批资料/无最终报告)
 
 当定时任务看起来“执行成功”，但只发了“第一批资料/等待继续搜索”等中间进度时，先跑预检确认是否命中 runtime 回归：
@@ -516,6 +571,10 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 
 # 飞书无回复快速预检
 bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh feishu-no-reply
+
+# 飞书单卡流式（先校验，再应用）
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh feishu-single-card -- verify
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh feishu-single-card -- apply
 
 # 自拍 Gemini Key 优先级预检
 bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh selfie-key-precheck

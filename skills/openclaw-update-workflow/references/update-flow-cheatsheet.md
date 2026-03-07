@@ -21,6 +21,14 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
 # 仅重打补丁
 bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh patch
 
+# 飞书单卡流式配置（apply 前建议先 verify）
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh feishu-single-card -- verify
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh feishu-single-card -- apply
+
+# 飞书单卡流式验收（按唯一标记抓同一窗口，判定 Started+Closed+replies=1）
+bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh \
+  feishu-single-card-accept -- --marker "[A2-23:59]" --chat-id oc_4f9389b28a8b716d80b16ad3de07be3d
+
 # Cron 半截报告回归预检
 bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_update_flow.sh cron-partial-precheck
 
