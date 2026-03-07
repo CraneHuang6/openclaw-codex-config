@@ -2,7 +2,8 @@
 """
 Synchronize OpenClaw/Claude model selection files after a model upgrade.
 
-This script only touches a fixed allowlist of 10 files.
+This script only touches a fixed allowlist of 10 static config files, and can
+also inspect/fix runtime cron model drift plus stale cron sessions.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 TARGET_OPENCLAW_FILES = [
@@ -30,27 +31,54 @@ TARGET_OPENCLAW_FILES = [
 ]
 
 TARGET_CLAUDE_FILE = ".claude/settings.json"
+RUNTIME_CRON_MODES = {"runtime-cron-scan", "runtime-cron-fix", "runtime-cron-verify"}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["scan", "apply", "verify", "all"],
+        choices=["scan", "apply", "verify", "all", *sorted(RUNTIME_CRON_MODES)],
         default="all",
-        help="scan: inspect only; apply: mutate files; verify: validate state; all: scan+apply+verify",
+        help=(
+            "scan/apply/verify/all: static 10-file sync; "
+            "runtime-cron-scan/fix/verify: inspect or repair cron payload.model and cron sessions"
+        ),
     )
     parser.add_argument("--home", default=str(Path.home()), help="User home path.")
     parser.add_argument("--provider", default="qmcode", help="Provider slug, default: qmcode.")
     parser.add_argument("--openclaw-home", help="Override OpenClaw home (default: <home>/.openclaw).")
     parser.add_argument("--claude-settings", help="Override Claude settings path.")
     parser.add_argument("--primary-model", required=True, help="Primary model id, e.g. gpt-5.4.")
-    parser.add_argument("--fallback-model", required=True, help="Fallback model id, e.g. gpt-5.3-codex.")
+    parser.add_argument(
+        "--fallback-model",
+        default="",
+        help="Optional fallback model id, e.g. gpt-5.3-codex. Leave empty for no fallback chain.",
+    )
     parser.add_argument(
         "--claude-model",
         help="Claude profile model id used in gpt-*. If omitted, uses --primary-model.",
     )
     parser.add_argument("--run-tests", action="store_true", help="Run OpenClaw regression tests in verify mode.")
+    parser.add_argument(
+        "--openclaw-bin",
+        default="/opt/homebrew/bin/openclaw",
+        help="OpenClaw CLI path used by runtime cron modes.",
+    )
+    parser.add_argument(
+        "--sessions-store",
+        help="Override sessions store path (default: <openclaw-home>/agents/main/sessions/sessions.json).",
+    )
+    parser.add_argument(
+        "--cron-session-prefix",
+        default="agent:main:cron:",
+        help="Session key prefix for cron runs in sessions.json.",
+    )
+    parser.add_argument(
+        "--clear-cron-sessions",
+        action="store_true",
+        help="With runtime-cron-fix, clear session keys using --cron-session-prefix after cron model edits.",
+    )
     return parser.parse_args()
 
 
@@ -72,6 +100,28 @@ def read_json(path: Path) -> dict:
 
 def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def run_command(cmd: List[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def fallback_ids(fallback_id: str) -> List[str]:
+    return [fallback_id] if fallback_id else []
+
+
+def fallback_slugs(provider: str, fallback_id: str) -> List[str]:
+    return [f"{provider}/{fallback_id}"] if fallback_id else []
+
+
+def shell_array(values: List[str]) -> str:
+    if not values:
+        return "()"
+    return "(" + " ".join(f'"{value}"' for value in values) + ")"
+
+
+def escaped_json_string(values: List[str]) -> str:
+    return json.dumps(values, ensure_ascii=False).replace('"', '\\"')
 
 
 def provider_models(doc: dict, provider: str) -> List[dict]:
@@ -137,39 +187,41 @@ def ensure_defaults_model_chain(
     models_map = defaults.setdefault("models", {})
 
     primary_slug = f"{provider}/{primary_id}"
-    fallback_slug = f"{provider}/{fallback_id}"
+    expected_fallback_slugs = fallback_slugs(provider, fallback_id)
 
     if model_obj.get("primary") != primary_slug:
         model_obj["primary"] = primary_slug
         changed = True
         notes.append(f"set primary={primary_slug}")
-    if model_obj.get("fallbacks") != [fallback_slug]:
-        model_obj["fallbacks"] = [fallback_slug]
+    if model_obj.get("fallbacks") != expected_fallback_slugs:
+        model_obj["fallbacks"] = expected_fallback_slugs
         changed = True
-        notes.append(f"set fallbacks=[{fallback_slug}]")
+        notes.append(f"set fallbacks={expected_fallback_slugs}")
 
     if primary_slug not in models_map:
         models_map[primary_slug] = {"alias": model_alias(primary_id)}
         changed = True
         notes.append(f"add models map key: {primary_slug}")
-    if fallback_slug not in models_map:
-        models_map[fallback_slug] = {"alias": model_alias(fallback_id)}
-        changed = True
-        notes.append(f"add models map key: {fallback_slug}")
 
     primary_entry = models_map.get(primary_slug)
-    if isinstance(primary_entry, dict):
-        desired_alias = model_alias(primary_id)
-        if primary_entry.get("alias") != desired_alias:
-            primary_entry["alias"] = desired_alias
-            changed = True
-            notes.append(f"set alias for {primary_slug}: {desired_alias}")
-
-    fallback_entry = models_map.get(fallback_slug)
-    if isinstance(fallback_entry, dict) and "alias" not in fallback_entry:
-        fallback_entry["alias"] = model_alias(fallback_id)
+    desired_primary_alias = model_alias(primary_id)
+    if isinstance(primary_entry, dict) and primary_entry.get("alias") != desired_primary_alias:
+        primary_entry["alias"] = desired_primary_alias
         changed = True
-        notes.append(f"set alias for {fallback_slug}: {model_alias(fallback_id)}")
+        notes.append(f"set alias for {primary_slug}: {desired_primary_alias}")
+
+    if fallback_id:
+        fallback_slug = f"{provider}/{fallback_id}"
+        if fallback_slug not in models_map:
+            models_map[fallback_slug] = {"alias": model_alias(fallback_id)}
+            changed = True
+            notes.append(f"add models map key: {fallback_slug}")
+        fallback_entry = models_map.get(fallback_slug)
+        desired_fallback_alias = model_alias(fallback_id)
+        if isinstance(fallback_entry, dict) and fallback_entry.get("alias") != desired_fallback_alias:
+            fallback_entry["alias"] = desired_fallback_alias
+            changed = True
+            notes.append(f"set alias for {fallback_slug}: {desired_fallback_alias}")
 
     return changed, notes
 
@@ -184,12 +236,14 @@ def replace_required_line(text: str, pattern: str, repl: str, desc: str) -> Tupl
 def update_shell_constants(
     path: Path,
     primary_slug: str,
-    fallback_slug: str,
+    fallback_model_slugs: List[str],
     primary_alias: str,
 ) -> Tuple[bool, List[str]]:
     text = path.read_text(encoding="utf-8")
     original = text
     notes: List[str] = []
+    fallback_json = escaped_json_string(fallback_model_slugs)
+    fallback_array = shell_array(fallback_model_slugs)
 
     if path.name == "daily-auto-update-local.sh":
         text, note = replace_required_line(
@@ -202,7 +256,7 @@ def update_shell_constants(
         text, note = replace_required_line(
             text,
             r'^DEFAULT_EXPECTED_FALLBACKS_JSON=.*$',
-            f'DEFAULT_EXPECTED_FALLBACKS_JSON="${{OPENCLAW_DAILY_UPDATE_EXPECTED_FALLBACKS_JSON:-[\\\"{fallback_slug}\\\"]}}"',
+            f'DEFAULT_EXPECTED_FALLBACKS_JSON="${{OPENCLAW_DAILY_UPDATE_EXPECTED_FALLBACKS_JSON:-{fallback_json}}}"',
             "daily: DEFAULT_EXPECTED_FALLBACKS_JSON",
         )
         notes.append(note)
@@ -224,7 +278,7 @@ def update_shell_constants(
         text, note = replace_required_line(
             text,
             r'^DEFAULT_MODEL_GUARD_FALLBACK_MODELS=.*$',
-            f'DEFAULT_MODEL_GUARD_FALLBACK_MODELS=("{fallback_slug}")',
+            f'DEFAULT_MODEL_GUARD_FALLBACK_MODELS={fallback_array}',
             "update script: DEFAULT_MODEL_GUARD_FALLBACK_MODELS",
         )
         notes.append(note)
@@ -246,7 +300,7 @@ def update_shell_constants(
         text, note = replace_required_line(
             text,
             r'^DEFAULT_FALLBACK_MODELS=.*$',
-            f'DEFAULT_FALLBACK_MODELS=("{fallback_slug}")',
+            f'DEFAULT_FALLBACK_MODELS={fallback_array}',
             "enforce script: DEFAULT_FALLBACK_MODELS",
         )
         notes.append(note)
@@ -264,7 +318,7 @@ def update_test_file(path: Path, replacements: Dict[str, str]) -> Tuple[bool, Li
     original = text
     notes: List[str] = []
     for old, new in replacements.items():
-        if old == new:
+        if not old or old == new:
             continue
         if old in text:
             count = text.count(old)
@@ -297,8 +351,8 @@ def update_claude_settings(path: Path, claude_model: str) -> Tuple[bool, List[st
 
 
 def verify_state(
-    home: Path,
     openclaw_home: Path,
+    claude_settings: Path,
     provider: str,
     primary_id: str,
     fallback_id: str,
@@ -306,35 +360,49 @@ def verify_state(
     run_tests: bool,
 ) -> bool:
     primary_slug = f"{provider}/{primary_id}"
-    fallback_slug = f"{provider}/{fallback_id}"
+    expected_fallback_slugs = fallback_slugs(provider, fallback_id)
     ok = True
 
     oc = read_json(openclaw_home / "openclaw.json")
     occ = read_json(openclaw_home / "openclaw_codex.json")
     am = read_json(openclaw_home / "agents/main/agent/models.json")
-    cs = read_json(home / ".claude/settings.json")
+    cs = read_json(claude_settings)
 
     for name, doc in [("openclaw.json", oc), ("openclaw_codex.json", occ)]:
         model_obj = doc["agents"]["defaults"]["model"]
         if model_obj.get("primary") != primary_slug:
             print(f"[FAIL] {name}: primary != {primary_slug}")
             ok = False
-        if model_obj.get("fallbacks") != [fallback_slug]:
-            print(f"[FAIL] {name}: fallbacks != [{fallback_slug}]")
+        if model_obj.get("fallbacks") != expected_fallback_slugs:
+            print(f"[FAIL] {name}: fallbacks != {expected_fallback_slugs}")
             ok = False
         model_map = doc["agents"]["defaults"].get("models", {})
-        if primary_slug not in model_map or fallback_slug not in model_map:
-            print(f"[FAIL] {name}: models map missing primary/fallback key")
+        if primary_slug not in model_map:
+            print(f"[FAIL] {name}: models map missing primary key {primary_slug}")
             ok = False
+        for fallback_slug in expected_fallback_slugs:
+            if fallback_slug not in model_map:
+                print(f"[FAIL] {name}: models map missing fallback key {fallback_slug}")
+                ok = False
         qm_ids = {m.get("id") for m in provider_models(doc, provider)}
-        if primary_id not in qm_ids or fallback_id not in qm_ids:
-            print(f"[FAIL] {name}: provider model definitions missing primary/fallback id")
+        if primary_id not in qm_ids:
+            print(f"[FAIL] {name}: provider model definitions missing primary id {primary_id}")
             ok = False
+        for fallback_id_item in fallback_ids(fallback_id):
+            if fallback_id_item not in qm_ids:
+                print(f"[FAIL] {name}: provider model definitions missing fallback id {fallback_id_item}")
+                ok = False
 
     am_ids = {m.get("id") for m in provider_models(am, provider)}
-    if primary_id not in am_ids or fallback_id not in am_ids:
-        print("[FAIL] agents/main/agent/models.json: provider model definitions missing primary/fallback id")
+    if primary_id not in am_ids:
+        print(f"[FAIL] agents/main/agent/models.json: provider model definitions missing primary id {primary_id}")
         ok = False
+    for fallback_id_item in fallback_ids(fallback_id):
+        if fallback_id_item not in am_ids:
+            print(
+                f"[FAIL] agents/main/agent/models.json: provider model definitions missing fallback id {fallback_id_item}"
+            )
+            ok = False
 
     env = cs.get("env", {})
     expected_profiles = {
@@ -344,23 +412,31 @@ def verify_state(
     }
     for key, expected in expected_profiles.items():
         if env.get(key) != expected:
-            print(f"[FAIL] .claude/settings.json: {key} != {expected}")
+            print(f"[FAIL] {claude_settings}: {key} != {expected}")
             ok = False
 
     daily_text = (openclaw_home / "scripts/daily-auto-update-local.sh").read_text(encoding="utf-8")
     update_text = (openclaw_home / "scripts/update-openclaw-with-feishu-repatch.sh").read_text(encoding="utf-8")
     enforce_text = (openclaw_home / "scripts/enforce-openclaw-kimi-model.sh").read_text(encoding="utf-8")
     primary_alias = model_alias(primary_id)
+    fallback_json = escaped_json_string(expected_fallback_slugs)
+    fallback_array = shell_array(expected_fallback_slugs)
 
     required_snippets = [
-        (daily_text, f"DEFAULT_EXPECTED_PRIMARY_MODEL=\"${{OPENCLAW_DAILY_UPDATE_EXPECTED_PRIMARY_MODEL:-{primary_slug}}}\""),
-        (daily_text, f"DEFAULT_EXPECTED_FALLBACKS_JSON=\"${{OPENCLAW_DAILY_UPDATE_EXPECTED_FALLBACKS_JSON:-[\\\"{fallback_slug}\\\"]}}\""),
-        (update_text, f"DEFAULT_MODEL_GUARD_PRIMARY_MODEL=\"{primary_slug}\""),
-        (update_text, f"DEFAULT_MODEL_GUARD_PRIMARY_ALIAS=\"{primary_alias}\""),
-        (update_text, f"DEFAULT_MODEL_GUARD_FALLBACK_MODELS=(\"{fallback_slug}\")"),
-        (enforce_text, f"DEFAULT_PRIMARY_MODEL=\"{primary_slug}\""),
-        (enforce_text, f"DEFAULT_PRIMARY_ALIAS=\"{primary_alias}\""),
-        (enforce_text, f"DEFAULT_FALLBACK_MODELS=(\"{fallback_slug}\")"),
+        (
+            daily_text,
+            f'DEFAULT_EXPECTED_PRIMARY_MODEL="${{OPENCLAW_DAILY_UPDATE_EXPECTED_PRIMARY_MODEL:-{primary_slug}}}"',
+        ),
+        (
+            daily_text,
+            f'DEFAULT_EXPECTED_FALLBACKS_JSON="${{OPENCLAW_DAILY_UPDATE_EXPECTED_FALLBACKS_JSON:-{fallback_json}}}"',
+        ),
+        (update_text, f'DEFAULT_MODEL_GUARD_PRIMARY_MODEL="{primary_slug}"'),
+        (update_text, f'DEFAULT_MODEL_GUARD_PRIMARY_ALIAS="{primary_alias}"'),
+        (update_text, f"DEFAULT_MODEL_GUARD_FALLBACK_MODELS={fallback_array}"),
+        (enforce_text, f'DEFAULT_PRIMARY_MODEL="{primary_slug}"'),
+        (enforce_text, f'DEFAULT_PRIMARY_ALIAS="{primary_alias}"'),
+        (enforce_text, f"DEFAULT_FALLBACK_MODELS={fallback_array}"),
     ]
     for text, snippet in required_snippets:
         if snippet not in text:
@@ -382,6 +458,180 @@ def verify_state(
     return ok
 
 
+def load_cron_jobs(openclaw_bin: str) -> List[dict]:
+    proc = run_command([openclaw_bin, "cron", "list", "--json"])
+    if proc.returncode != 0:
+        raise RuntimeError(f"openclaw cron list failed (rc={proc.returncode}): {(proc.stderr or proc.stdout).strip()}")
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"failed to parse openclaw cron list JSON: {exc}") from exc
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, list):
+        raise RuntimeError("openclaw cron list JSON missing jobs[]")
+    return jobs
+
+
+def cron_job_payload_model(job: dict) -> str | None:
+    payload = job.get("payload") if isinstance(job, dict) else None
+    if isinstance(payload, dict) and isinstance(payload.get("model"), str):
+        return payload.get("model")
+    return None
+
+
+def cron_job_summary(job: dict) -> dict:
+    return {
+        "id": job.get("id"),
+        "name": job.get("name"),
+        "enabled": job.get("enabled"),
+        "payload_model": cron_job_payload_model(job),
+        "updatedAtMs": job.get("updatedAtMs"),
+    }
+
+
+def collect_cron_model_mismatches(jobs: List[dict], target_slug: str) -> List[dict]:
+    mismatches: List[dict] = []
+    for job in jobs:
+        payload_model = cron_job_payload_model(job)
+        if payload_model != target_slug:
+            mismatches.append(cron_job_summary(job))
+    return mismatches
+
+
+def load_sessions_store(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return read_json(path)
+
+
+def collect_cron_session_mismatches(
+    sessions_doc: dict,
+    prefix: str,
+    provider: str,
+    primary_id: str,
+) -> List[dict]:
+    mismatches: List[dict] = []
+    for key, value in sessions_doc.items():
+        if not str(key).startswith(prefix):
+            continue
+        entry = value if isinstance(value, dict) else {}
+        model = entry.get("model")
+        model_provider = entry.get("modelProvider")
+        if model != primary_id or (model_provider not in (None, provider)):
+            mismatches.append(
+                {
+                    "key": key,
+                    "model": model,
+                    "modelProvider": model_provider,
+                    "sessionId": entry.get("sessionId"),
+                    "updatedAt": entry.get("updatedAt"),
+                }
+            )
+    return mismatches
+
+
+def clear_cron_sessions(path: Path, prefix: str) -> dict:
+    if not path.exists():
+        return {"path": str(path), "exists": False, "removed_count": 0, "removed_keys": []}
+    doc = read_json(path)
+    if not isinstance(doc, dict):
+        raise ValueError(f"sessions store is not an object: {path}")
+    removed_keys = [key for key in doc if str(key).startswith(prefix)]
+    if removed_keys:
+        new_doc = {key: value for key, value in doc.items() if not str(key).startswith(prefix)}
+        write_json(path, new_doc)
+    return {"path": str(path), "exists": True, "removed_count": len(removed_keys), "removed_keys": removed_keys}
+
+
+def runtime_cron_scan(args: argparse.Namespace, sessions_store: Path) -> int:
+    target_slug = f"{args.provider}/{args.primary_model}"
+    jobs = load_cron_jobs(args.openclaw_bin)
+    mismatches = collect_cron_model_mismatches(jobs, target_slug)
+    report = {
+        "target_model": target_slug,
+        "job_count": len(jobs),
+        "mismatch_count": len(mismatches),
+        "mismatches": mismatches,
+        "sessions_store": str(sessions_store),
+    }
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def runtime_cron_fix(args: argparse.Namespace, sessions_store: Path) -> int:
+    target_slug = f"{args.provider}/{args.primary_model}"
+    jobs = load_cron_jobs(args.openclaw_bin)
+    mismatches = collect_cron_model_mismatches(jobs, target_slug)
+    edited: List[dict] = []
+    failed: List[dict] = []
+
+    for job in mismatches:
+        job_id = str(job["id"])
+        proc = run_command([args.openclaw_bin, "cron", "edit", job_id, "--model", target_slug])
+        item = {
+            "id": job_id,
+            "name": job.get("name"),
+            "from_model": job.get("payload_model"),
+            "to_model": target_slug,
+            "returncode": proc.returncode,
+            "output": (proc.stdout or proc.stderr).strip(),
+        }
+        if proc.returncode == 0:
+            edited.append(item)
+        else:
+            failed.append(item)
+
+    cleared_sessions = None
+    if args.clear_cron_sessions:
+        cleared_sessions = clear_cron_sessions(sessions_store, args.cron_session_prefix)
+
+    remaining_jobs = load_cron_jobs(args.openclaw_bin)
+    remaining_mismatches = collect_cron_model_mismatches(remaining_jobs, target_slug)
+    report = {
+        "target_model": target_slug,
+        "edited_count": len(edited),
+        "failed_count": len(failed),
+        "edited": edited,
+        "failed": failed,
+        "remaining_mismatch_count": len(remaining_mismatches),
+        "remaining_mismatches": remaining_mismatches,
+        "cleared_sessions": cleared_sessions,
+    }
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 1 if failed or remaining_mismatches else 0
+
+
+def runtime_cron_verify(args: argparse.Namespace, sessions_store: Path) -> int:
+    target_slug = f"{args.provider}/{args.primary_model}"
+    jobs = load_cron_jobs(args.openclaw_bin)
+    job_mismatches = collect_cron_model_mismatches(jobs, target_slug)
+    sessions_doc = load_sessions_store(sessions_store)
+    session_mismatches = collect_cron_session_mismatches(
+        sessions_doc,
+        args.cron_session_prefix,
+        args.provider,
+        args.primary_model,
+    )
+
+    if job_mismatches:
+        print(f"[FAIL] cron payload.model mismatch count={len(job_mismatches)}")
+    if session_mismatches:
+        print(f"[FAIL] cron session model mismatch count={len(session_mismatches)}")
+
+    report = {
+        "target_model": target_slug,
+        "job_count": len(jobs),
+        "job_mismatch_count": len(job_mismatches),
+        "job_mismatches": job_mismatches,
+        "sessions_store": str(sessions_store),
+        "sessions_store_exists": sessions_store.exists(),
+        "session_mismatch_count": len(session_mismatches),
+        "session_mismatches": session_mismatches,
+    }
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 1 if job_mismatches or session_mismatches else 0
+
+
 def main() -> int:
     args = parse_args()
     home = Path(args.home).expanduser().resolve()
@@ -389,13 +639,29 @@ def main() -> int:
     claude_settings = (
         Path(args.claude_settings).expanduser().resolve() if args.claude_settings else home / TARGET_CLAUDE_FILE
     )
+    sessions_store = (
+        Path(args.sessions_store).expanduser().resolve()
+        if args.sessions_store
+        else openclaw_home / "agents/main/sessions/sessions.json"
+    )
     claude_model = args.claude_model or args.primary_model
 
     primary_slug = f"{args.provider}/{args.primary_model}"
-    fallback_slug = f"{args.provider}/{args.fallback_model}"
+    expected_fallback_slugs = fallback_slugs(args.provider, args.fallback_model)
     print(f"[INFO] target primary={primary_slug}")
-    print(f"[INFO] target fallback={fallback_slug}")
+    print(f"[INFO] target fallbacks={expected_fallback_slugs}")
     print(f"[INFO] target claude model={claude_model}")
+
+    if args.mode in RUNTIME_CRON_MODES:
+        try:
+            if args.mode == "runtime-cron-scan":
+                return runtime_cron_scan(args, sessions_store)
+            if args.mode == "runtime-cron-fix":
+                return runtime_cron_fix(args, sessions_store)
+            return runtime_cron_verify(args, sessions_store)
+        except (RuntimeError, ValueError) as exc:
+            print(f"[ERROR] {exc}")
+            return 2
 
     oc_path = openclaw_home / "openclaw.json"
     occ_path = openclaw_home / "openclaw_codex.json"
@@ -412,7 +678,7 @@ def main() -> int:
 
     current_primary_slug = oc["agents"]["defaults"]["model"].get("primary", primary_slug)
     current_fallbacks = oc["agents"]["defaults"]["model"].get("fallbacks", [])
-    current_fallback_slug = current_fallbacks[0] if current_fallbacks else fallback_slug
+    current_fallback_slug = current_fallbacks[0] if current_fallbacks else ""
     current_primary_alias = (
         oc["agents"]["defaults"].get("models", {}).get(current_primary_slug, {}).get("alias")
         if isinstance(oc["agents"]["defaults"].get("models", {}).get(current_primary_slug), dict)
@@ -422,7 +688,7 @@ def main() -> int:
         current_primary_alias = model_alias(args.primary_model)
 
     print(f"[INFO] current primary={current_primary_slug}")
-    print(f"[INFO] current fallback={current_fallback_slug}")
+    print(f"[INFO] current fallbacks={current_fallbacks}")
 
     if args.mode in {"scan", "all"}:
         for rel in TARGET_OPENCLAW_FILES:
@@ -432,7 +698,7 @@ def main() -> int:
 
     if args.mode in {"apply", "all"}:
         catalog = build_catalog([oc, occ, am], args.provider)
-        required_ids = [args.primary_model, args.fallback_model]
+        required_ids = [args.primary_model, *fallback_ids(args.fallback_model)]
         changed_files: Dict[str, List[str]] = {}
 
         for name, doc, path in [("openclaw.json", oc, oc_path), ("openclaw_codex.json", occ, occ_path)]:
@@ -461,15 +727,16 @@ def main() -> int:
             "scripts/enforce-openclaw-kimi-model.sh",
         ]:
             path = openclaw_home / rel
-            changed, notes = update_shell_constants(path, primary_slug, fallback_slug, model_alias(args.primary_model))
+            changed, notes = update_shell_constants(path, primary_slug, expected_fallback_slugs, model_alias(args.primary_model))
             if changed:
                 changed_files[str(path)] = notes
 
         replacements = {
             current_primary_slug: primary_slug,
-            current_fallback_slug: fallback_slug,
             current_primary_alias: model_alias(args.primary_model),
         }
+        if args.fallback_model and current_fallback_slug:
+            replacements[current_fallback_slug] = expected_fallback_slugs[0]
         for rel in [
             "scripts/tests/daily-auto-update-local.test.sh",
             "scripts/tests/enforce-openclaw-kimi-model.test.sh",
@@ -495,8 +762,8 @@ def main() -> int:
 
     if args.mode in {"verify", "all"}:
         ok = verify_state(
-            home=home,
             openclaw_home=openclaw_home,
+            claude_settings=claude_settings,
             provider=args.provider,
             primary_id=args.primary_model,
             fallback_id=args.fallback_model,
