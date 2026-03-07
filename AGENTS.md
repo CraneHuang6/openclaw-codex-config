@@ -118,7 +118,8 @@ For gate-bearing sub-agents, these 6 top-level sections are the mandatory baseli
 
 ## 5) Commit policy
 - Do not assume `notify` or any auto-commit hook is enabled unless `~/.codex/config.toml` explicitly declares it.
-- The authoritative rule is: commit is allowed only after Gate D2 final acceptance passes.
+- Gate D2 final acceptance remains the authoritative approval point for finishing/integration-triggered commits.
+- A config-declared turn-level auto-commit hook is also allowed as a separate local commit mechanism when `~/.codex/config.toml` explicitly enables it.
 - Auto commit for OpenClaw update workflow is allowed only when `OPENCLAW_SKILL_GATE_D2_VERDICT=PASS`.
 - OpenClaw auto commit scope is allowlist-only: `AGENTS.md` and `skills/openclaw-update-workflow/**` under `/Users/crane/.codex`.
 - If any dirty changes exist outside the allowlist, auto commit must skip (`fail-closed`) and report reason; it must not force commit.
