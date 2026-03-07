@@ -239,6 +239,21 @@ bash /Users/crane/.codex/skills/openclaw-update-workflow/scripts/run_openclaw_up
   - `env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u all_proxy -u no_proxy openclaw gateway install --force`
   - `openclaw gateway probe`
 
+### 2026-03-07 经验沉淀：共享 DM 主会话竞争会伪装成 replies=0
+
+1. 先按“共享主会话竞争”识别，不要直接归因给发送层：
+   - 同一条消息窗口若同时出现 `dispatching to agent (session=agent:main:main)`、`dispatch complete (queuedFinal=false, replies=0)`，且 session transcript 后续仍能看到 assistant `provider=openclaw, model=delivery-mirror`，优先按“Feishu DM 与其他入口共享主会话，派发窗口先结束、答案后到”处理。
+2. 最小修复动作：
+   - live 运行态改 `/Users/crane/.openclaw/openclaw.json`：`session.dmScope="per-channel-peer"`
+   - `openclaw gateway restart`
+   - 飞书实测一条 DM，确认日志从 `dispatching to agent (session=agent:main:main)` 变成 `dispatching to agent (session=agent:main:feishu:direct:...)`
+3. 配置文件边界要分清：
+   - `/Users/crane/.openclaw/openclaw.json` 是 live 运行态配置，通常被 `.gitignore` 忽略
+   - `/Users/crane/.openclaw/openclaw_codex.json` 才是仓库跟踪配置
+   - 所以 live 修完不代表当前 repo 一定有可 merge 的 diff，要单独用 `git ls-files` / `git diff` 确认
+4. 预检新口径：
+   - 当 `feishu-no-reply` 输出 `RESULT=pass` + `REASON=inbound observed with async session delivery marker`，且同时附带 `LIKELY_ROOT_CAUSE=shared-main-dm-session-contention` 时，优先修 `dmScope`，不要先回退纯文本或重打无关补丁。
+
 ### 经验补充：预检误报与实时状态冲突
 
 1. `feishu-no-reply` 可能因窗口内历史 `ParseError` 命中而误报 `RESULT=fail`（历史日志污染，不一定代表当前仍故障）。
