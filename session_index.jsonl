@@ -247,3 +247,14 @@
 {"id":"019cc614-e4c5-7be3-9770-5539ac74b7a8","thread_name":"Run opclaw tts tests and status","updated_at":"2026-03-07T02:16:33.59448Z"}
 {"id":"019cc614-dfae-7050-ae3a-ea83c09e9836","thread_name":"Review backend idle reap pre-merge","updated_at":"2026-03-07T02:16:38.470266Z"}
 {"id":"019cc617-1907-7360-8c58-e6b06f4be2ec","thread_name":"Run Feishu verification suite","updated_at":"2026-03-07T02:18:56.362168Z"}
+{"id":"019cc680-4783-7d03-a6ba-888083bf8db7","thread_name":"已启用技能`using-superpowers` Approve pre","updated_at":"2026-03-07T04:13:56.919258Z"}
+{"id":"019cc682-71ff-7e01-9801-42186e6dd563","thread_name":"Check docs consistency with latest C","updated_at":"2026-03-07T04:16:21.727326Z"}
+{"id":"019cc684-69dc-7b32-abc9-44d99ae59971","thread_name":"Verify Gate D1 plan","updated_at":"2026-03-07T04:18:33.70751Z"}
+{"id":"019cc685-197e-7923-a891-9e1e23f50058","thread_name":"Review .playwright-cli index removal","updated_at":"2026-03-07T04:19:16.068084Z"}
+{"id":"019cc685-2667-72c1-9a7e-8322c8274f2a","thread_name":"Analyze staged .playwright-cli delet","updated_at":"2026-03-07T04:19:23.023397Z"}
+{"id":"019cc685-d42c-7243-9cd8-cf7a1218e2a6","thread_name":"Investigate sessions 502 degraded","updated_at":"2026-03-07T04:20:04.196013Z"}
+{"id":"019cc686-9e59-7560-9525-346705fb9af6","thread_name":"Prepare Gate D2 review packet","updated_at":"2026-03-07T04:20:54.431287Z"}
+{"id":"019cc686-2361-73a1-aa7a-f2e88b40d6f1","thread_name":"忽略运行时差异并提交其余未提交}ṋ(Note mismatch?)","updated_at":"2026-03-07T04:21:02.252304Z"}
+{"id":"019cc688-0e7e-7373-a0d0-87e18523e364","thread_name":"Inspect tracked changes for runtime","updated_at":"2026-03-07T04:22:29.735806Z"}
+{"id":"019cc688-06b9-76a2-af09-7495e279a265","thread_name":"Inspect untracked runtime artifacts","updated_at":"2026-03-07T04:22:31.079659Z"}
+{"id":"019cc68a-1411-7c23-b9cd-5d2f7a68782d","thread_name":"Review Gate B repair plan","updated_at":"2026-03-07T04:24:33.583137Z"}

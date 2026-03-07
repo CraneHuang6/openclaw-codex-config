@@ -51,3 +51,10 @@ hide_full_access_warning = true
 
 [mcp_servers.openaiDeveloperDocs]
 url = "https://developers.openai.com/mcp"
+
+[mcp_servers.playwright]
+args = ["@playwright/mcp@latest"]
+command = "npx"
+
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
