@@ -32,16 +32,17 @@ TARGET_OPENCLAW_FILES = [
 
 TARGET_CLAUDE_FILE = ".claude/settings.json"
 RUNTIME_CRON_MODES = {"runtime-cron-scan", "runtime-cron-fix", "runtime-cron-verify"}
+DOCTOR_MODE = "doctor"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["scan", "apply", "verify", "all", *sorted(RUNTIME_CRON_MODES)],
+        choices=["scan", "apply", "verify", "all", DOCTOR_MODE, *sorted(RUNTIME_CRON_MODES)],
         default="all",
         help=(
-            "scan/apply/verify/all: static 10-file sync; "
+            "scan/apply/verify/all: static 10-file sync; doctor: one-shot static+cron+session+canary self-check; "
             "runtime-cron-scan/fix/verify: inspect or repair cron payload.model and cron sessions"
         ),
     )
@@ -79,6 +80,33 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="With runtime-cron-fix, clear session keys using --cron-session-prefix after cron model edits.",
     )
+    parser.add_argument(
+        "--doctor-session-key",
+        default="agent:main:main",
+        help="Primary session key expected to use the target model during doctor mode.",
+    )
+    parser.add_argument(
+        "--doctor-log-limit",
+        type=int,
+        default=200,
+        help="Recent gateway log lines scanned in doctor mode.",
+    )
+    parser.add_argument(
+        "--doctor-probe-timeout-ms",
+        type=int,
+        default=12000,
+        help="Probe timeout in ms used by doctor mode.",
+    )
+    parser.add_argument(
+        "--doctor-probe-concurrency",
+        type=int,
+        default=1,
+        help="Probe concurrency used by doctor mode.",
+    )
+    parser.add_argument(
+        "--doctor-old-model",
+        help="Optional old model string scanned in recent logs by doctor mode. Defaults to --fallback-model.",
+    )
     return parser.parse_args()
 
 
@@ -104,6 +132,19 @@ def write_json(path: Path, data: dict) -> None:
 
 def run_command(cmd: List[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def parse_json_object_from_text(text: str) -> Any:
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char not in "[{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(text[index:])
+            return obj
+        except json.JSONDecodeError:
+            continue
+    raise ValueError("no JSON object found in command output")
 
 
 def fallback_ids(fallback_id: str) -> List[str]:
@@ -350,7 +391,7 @@ def update_claude_settings(path: Path, claude_model: str) -> Tuple[bool, List[st
     return changed, notes
 
 
-def verify_state(
+def collect_static_failures(
     openclaw_home: Path,
     claude_settings: Path,
     provider: str,
@@ -358,10 +399,10 @@ def verify_state(
     fallback_id: str,
     claude_model: str,
     run_tests: bool,
-) -> bool:
+) -> List[str]:
     primary_slug = f"{provider}/{primary_id}"
     expected_fallback_slugs = fallback_slugs(provider, fallback_id)
-    ok = True
+    failures: List[str] = []
 
     oc = read_json(openclaw_home / "openclaw.json")
     occ = read_json(openclaw_home / "openclaw_codex.json")
@@ -371,38 +412,30 @@ def verify_state(
     for name, doc in [("openclaw.json", oc), ("openclaw_codex.json", occ)]:
         model_obj = doc["agents"]["defaults"]["model"]
         if model_obj.get("primary") != primary_slug:
-            print(f"[FAIL] {name}: primary != {primary_slug}")
-            ok = False
+            failures.append(f"[FAIL] {name}: primary != {primary_slug}")
         if model_obj.get("fallbacks") != expected_fallback_slugs:
-            print(f"[FAIL] {name}: fallbacks != {expected_fallback_slugs}")
-            ok = False
+            failures.append(f"[FAIL] {name}: fallbacks != {expected_fallback_slugs}")
         model_map = doc["agents"]["defaults"].get("models", {})
         if primary_slug not in model_map:
-            print(f"[FAIL] {name}: models map missing primary key {primary_slug}")
-            ok = False
+            failures.append(f"[FAIL] {name}: models map missing primary key {primary_slug}")
         for fallback_slug in expected_fallback_slugs:
             if fallback_slug not in model_map:
-                print(f"[FAIL] {name}: models map missing fallback key {fallback_slug}")
-                ok = False
+                failures.append(f"[FAIL] {name}: models map missing fallback key {fallback_slug}")
         qm_ids = {m.get("id") for m in provider_models(doc, provider)}
         if primary_id not in qm_ids:
-            print(f"[FAIL] {name}: provider model definitions missing primary id {primary_id}")
-            ok = False
+            failures.append(f"[FAIL] {name}: provider model definitions missing primary id {primary_id}")
         for fallback_id_item in fallback_ids(fallback_id):
             if fallback_id_item not in qm_ids:
-                print(f"[FAIL] {name}: provider model definitions missing fallback id {fallback_id_item}")
-                ok = False
+                failures.append(f"[FAIL] {name}: provider model definitions missing fallback id {fallback_id_item}")
 
     am_ids = {m.get("id") for m in provider_models(am, provider)}
     if primary_id not in am_ids:
-        print(f"[FAIL] agents/main/agent/models.json: provider model definitions missing primary id {primary_id}")
-        ok = False
+        failures.append(f"[FAIL] agents/main/agent/models.json: provider model definitions missing primary id {primary_id}")
     for fallback_id_item in fallback_ids(fallback_id):
         if fallback_id_item not in am_ids:
-            print(
+            failures.append(
                 f"[FAIL] agents/main/agent/models.json: provider model definitions missing fallback id {fallback_id_item}"
             )
-            ok = False
 
     env = cs.get("env", {})
     expected_profiles = {
@@ -412,8 +445,7 @@ def verify_state(
     }
     for key, expected in expected_profiles.items():
         if env.get(key) != expected:
-            print(f"[FAIL] {claude_settings}: {key} != {expected}")
-            ok = False
+            failures.append(f"[FAIL] {claude_settings}: {key} != {expected}")
 
     daily_text = (openclaw_home / "scripts/daily-auto-update-local.sh").read_text(encoding="utf-8")
     update_text = (openclaw_home / "scripts/update-openclaw-with-feishu-repatch.sh").read_text(encoding="utf-8")
@@ -438,10 +470,9 @@ def verify_state(
         (enforce_text, f'DEFAULT_PRIMARY_ALIAS="{primary_alias}"'),
         (enforce_text, f"DEFAULT_FALLBACK_MODELS={fallback_array}"),
     ]
-    for text, snippet in required_snippets:
-        if snippet not in text:
-            print(f"[FAIL] script snippet missing: {snippet}")
-            ok = False
+    for source_text, snippet in required_snippets:
+        if snippet not in source_text:
+            failures.append(f"[FAIL] script snippet missing: {snippet}")
 
     if run_tests:
         test_cmds = [
@@ -453,9 +484,31 @@ def verify_state(
             print(f"[RUN] bash {cmd}")
             rc = subprocess.call(["bash", cmd])
             if rc != 0:
-                print(f"[FAIL] test failed (rc={rc}): {cmd}")
-                ok = False
-    return ok
+                failures.append(f"[FAIL] test failed (rc={rc}): {cmd}")
+    return failures
+
+
+def verify_state(
+    openclaw_home: Path,
+    claude_settings: Path,
+    provider: str,
+    primary_id: str,
+    fallback_id: str,
+    claude_model: str,
+    run_tests: bool,
+) -> bool:
+    failures = collect_static_failures(
+        openclaw_home=openclaw_home,
+        claude_settings=claude_settings,
+        provider=provider,
+        primary_id=primary_id,
+        fallback_id=fallback_id,
+        claude_model=claude_model,
+        run_tests=run_tests,
+    )
+    for failure in failures:
+        print(failure)
+    return not failures
 
 
 def load_cron_jobs(openclaw_bin: str) -> List[dict]:
@@ -632,6 +685,245 @@ def runtime_cron_verify(args: argparse.Namespace, sessions_store: Path) -> int:
     return 1 if job_mismatches or session_mismatches else 0
 
 
+def load_probe_payload(openclaw_bin: str, provider: str, timeout_ms: int, concurrency: int) -> dict:
+    proc = run_command(
+        [
+            openclaw_bin,
+            "models",
+            "status",
+            "--probe",
+            "--json",
+            "--probe-provider",
+            provider,
+            "--probe-timeout",
+            str(timeout_ms),
+            "--probe-concurrency",
+            str(concurrency),
+        ]
+    )
+    if proc.returncode != 0:
+        combined = (proc.stdout or "") + (proc.stderr or "")
+        raise RuntimeError(f"openclaw models status --probe failed (rc={proc.returncode}): {combined.strip()}")
+    payload = parse_json_object_from_text((proc.stdout or "") + "\n" + (proc.stderr or ""))
+    if not isinstance(payload, dict):
+        raise RuntimeError("openclaw models status --probe did not return a JSON object")
+    return payload
+
+
+def collect_probe_status(payload: dict, provider: str, target_slug: str, expected_fallbacks: List[str]) -> dict:
+    auth = payload.get("auth") if isinstance(payload.get("auth"), dict) else {}
+    probes = auth.get("probes") if isinstance(auth.get("probes"), dict) else {}
+    results = probes.get("results") if isinstance(probes.get("results"), list) else []
+    target_results = [
+        item
+        for item in results
+        if isinstance(item, dict)
+        and item.get("provider") == provider
+        and item.get("model") == target_slug
+    ]
+    resolved_default = payload.get("resolvedDefault")
+    actual_fallbacks = payload.get("fallbacks") if isinstance(payload.get("fallbacks"), list) else []
+    ok = (
+        resolved_default == target_slug
+        and actual_fallbacks == expected_fallbacks
+        and any(item.get("status") == "ok" for item in target_results)
+    )
+    return {
+        "ok": ok,
+        "resolved_default": resolved_default,
+        "resolved_default_ok": resolved_default == target_slug,
+        "fallbacks": actual_fallbacks,
+        "fallbacks_ok": actual_fallbacks == expected_fallbacks,
+        "probe_results": target_results,
+        "probe_options": probes.get("options"),
+        "probe_duration_ms": probes.get("durationMs"),
+    }
+
+
+def load_log_rows(openclaw_bin: str, limit: int) -> List[dict]:
+    proc = run_command([openclaw_bin, "logs", "--json", "--limit", str(limit)])
+    if proc.returncode != 0:
+        combined = (proc.stdout or "") + (proc.stderr or "")
+        raise RuntimeError(f"openclaw logs failed (rc={proc.returncode}): {combined.strip()}")
+    rows: List[dict] = []
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip()
+        if not line or not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            rows.append(obj)
+    return rows
+
+
+def trim_events(events: List[dict], limit: int = 20) -> List[dict]:
+    return events[:limit]
+
+
+def collect_log_alerts(log_rows: List[dict], old_model: str) -> dict:
+    membership_or_401: List[dict] = []
+    old_model_hits: List[dict] = []
+    model_snapshot_hits: List[dict] = []
+
+    for row in log_rows:
+        if row.get("type") != "log":
+            continue
+        message = str(row.get("message") or "")
+        lower_message = message.lower()
+        event = {
+            "time": row.get("time"),
+            "level": row.get("level"),
+            "subsystem": row.get("subsystem"),
+            "message": message[:500],
+        }
+        if (
+            re.search(r"\bmembership\b", lower_message)
+            or re.search(r"\b401\b", message)
+            or "http 401" in lower_message
+            or "user not found" in lower_message
+        ):
+            membership_or_401.append(event)
+        if old_model and old_model in message:
+            old_model_hits.append(event)
+        if old_model and f"model-snapshot -> {old_model}" in message:
+            model_snapshot_hits.append(event)
+
+    return {
+        "ok": not membership_or_401 and not model_snapshot_hits and (not old_model or not old_model_hits),
+        "old_model": old_model,
+        "membership_or_401": trim_events(membership_or_401),
+        "old_model_hits": trim_events(old_model_hits),
+        "model_snapshot_hits": trim_events(model_snapshot_hits),
+    }
+
+
+def collect_main_session_status(sessions_doc: dict, session_key: str, provider: str, primary_id: str) -> dict:
+    entry = sessions_doc.get(session_key) if isinstance(sessions_doc, dict) else None
+    if not isinstance(entry, dict):
+        return {
+            "session_key": session_key,
+            "exists": False,
+            "ok": False,
+            "reason": "missing",
+        }
+    model = entry.get("model")
+    model_provider = entry.get("modelProvider")
+    ok = model == primary_id and model_provider in (None, provider)
+    return {
+        "session_key": session_key,
+        "exists": True,
+        "ok": ok,
+        "reason": None if ok else "model mismatch",
+        "model": model,
+        "modelProvider": model_provider,
+        "sessionId": entry.get("sessionId"),
+        "updatedAt": entry.get("updatedAt"),
+    }
+
+
+def doctor(
+    args: argparse.Namespace,
+    openclaw_home: Path,
+    claude_settings: Path,
+    sessions_store: Path,
+) -> int:
+    target_slug = f"{args.provider}/{args.primary_model}"
+    expected_fallbacks = fallback_slugs(args.provider, args.fallback_model)
+    static_failures = collect_static_failures(
+        openclaw_home=openclaw_home,
+        claude_settings=claude_settings,
+        provider=args.provider,
+        primary_id=args.primary_model,
+        fallback_id=args.fallback_model,
+        claude_model=args.claude_model or args.primary_model,
+        run_tests=args.run_tests,
+    )
+
+    jobs = load_cron_jobs(args.openclaw_bin)
+    job_mismatches = collect_cron_model_mismatches(jobs, target_slug)
+
+    sessions_doc = load_sessions_store(sessions_store)
+    cron_session_mismatches = collect_cron_session_mismatches(
+        sessions_doc,
+        args.cron_session_prefix,
+        args.provider,
+        args.primary_model,
+    )
+    main_session = collect_main_session_status(
+        sessions_doc=sessions_doc,
+        session_key=args.doctor_session_key,
+        provider=args.provider,
+        primary_id=args.primary_model,
+    )
+
+    probe_error = None
+    try:
+        probe_payload = load_probe_payload(
+            openclaw_bin=args.openclaw_bin,
+            provider=args.provider,
+            timeout_ms=args.doctor_probe_timeout_ms,
+            concurrency=args.doctor_probe_concurrency,
+        )
+        probe_report = collect_probe_status(probe_payload, args.provider, target_slug, expected_fallbacks)
+    except (RuntimeError, ValueError) as exc:
+        probe_error = str(exc)
+        probe_report = {"ok": False, "error": probe_error}
+
+    log_error = None
+    old_model = args.doctor_old_model if args.doctor_old_model is not None else args.fallback_model
+    try:
+        log_rows = load_log_rows(args.openclaw_bin, args.doctor_log_limit)
+        canary_report = collect_log_alerts(log_rows, old_model)
+        canary_report["log_limit"] = args.doctor_log_limit
+    except RuntimeError as exc:
+        log_error = str(exc)
+        canary_report = {"ok": False, "error": log_error, "old_model": old_model, "log_limit": args.doctor_log_limit}
+
+    overall_ok = (
+        not static_failures
+        and not job_mismatches
+        and not cron_session_mismatches
+        and main_session.get("ok") is True
+        and probe_report.get("ok") is True
+        and canary_report.get("ok") is True
+    )
+
+    report = {
+        "mode": DOCTOR_MODE,
+        "target_model": target_slug,
+        "expected_fallbacks": expected_fallbacks,
+        "static": {
+            "ok": not static_failures,
+            "failure_count": len(static_failures),
+            "failures": static_failures,
+        },
+        "cron": {
+            "job_count": len(jobs),
+            "job_mismatch_count": len(job_mismatches),
+            "job_mismatches": job_mismatches,
+            "sessions_store": str(sessions_store),
+            "cron_session_mismatch_count": len(cron_session_mismatches),
+            "cron_session_mismatches": cron_session_mismatches,
+        },
+        "sessions": {
+            "main_session": main_session,
+        },
+        "probe": probe_report,
+        "canary": canary_report,
+        "summary": {
+            "ok": overall_ok,
+            "probe_error": probe_error,
+            "log_error": log_error,
+        },
+    }
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    print("[DOCTOR] PASS" if overall_ok else "[DOCTOR] FAIL")
+    return 0 if overall_ok else 1
+
+
 def main() -> int:
     args = parse_args()
     home = Path(args.home).expanduser().resolve()
@@ -651,6 +943,13 @@ def main() -> int:
     print(f"[INFO] target primary={primary_slug}")
     print(f"[INFO] target fallbacks={expected_fallback_slugs}")
     print(f"[INFO] target claude model={claude_model}")
+
+    if args.mode == DOCTOR_MODE:
+        try:
+            return doctor(args, openclaw_home, claude_settings, sessions_store)
+        except (RuntimeError, ValueError) as exc:
+            print(f"[ERROR] {exc}")
+            return 2
 
     if args.mode in RUNTIME_CRON_MODES:
         try:

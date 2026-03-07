@@ -1,4 +1,4 @@
 interface:
   display_name: "OpenClaw 模型升级同步"
-  short_description: "大模型升级后执行一键总控：静态同步、运行态硬切、探针验模、防漂移"
-  default_prompt: "Use $openclaw-model-upgrade-sync to run the one-shot model switch flow: static sync, runtime hard-cut, baseline probe sessions, and drift verification, while preserving monitor on mini."
+  short_description: "大模型升级后同步静态配置、cron/会话，并支持 doctor 总检与灰度验收"
+  default_prompt: "Use $openclaw-model-upgrade-sync to synchronize the static 10-file model config, scan or fix cron payload.model drift, clear stale cron sessions when needed, run the doctor one-shot self-check for static plus cron plus session plus probe plus canary status, and then perform runtime hard-cut verification while preserving monitor on mini."

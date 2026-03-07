@@ -238,3 +238,8 @@
 {"id":"019cc5f5-d745-7010-b738-37919479d1d3","thread_name":"Analyze system RAM error RCA","updated_at":"2026-03-07T01:43:15.82787Z"}
 {"id":"019cc5f7-2132-75c2-872c-84cb0512ee4b","thread_name":"Investigate macOS app memory logs","updated_at":"2026-03-07T01:44:01.576002Z"}
 {"id":"019cc5f7-26f6-7ea3-8ee4-f7da5fe8408d","thread_name":"Investigate macOS Python memory hog","updated_at":"2026-03-07T01:44:15.157518Z"}
+{"id":"019cc601-188b-7e61-b9f8-6c73c4e22c85","thread_name":"Implement Feishu streaming card fix","updated_at":"2026-03-07T01:54:54.503567Z"}
+{"id":"019cc606-b246-7183-8718-7cef90932282","thread_name":"无法启用技能using-superpowers","updated_at":"2026-03-07T02:01:03.380867Z"}
+{"id":"019cc606-e5fe-7c92-b70e-37b3f319d89d","thread_name":"Monitor worker 019cc606 progress","updated_at":"2026-03-07T02:01:14.860143Z"}
+{"id":"019cc609-6f49-7cc2-8a82-15c6e1e7405b","thread_name":"Add idle backend launchd support","updated_at":"2026-03-07T02:04:00.477557Z"}
+{"id":"019cc60a-ceca-7d50-bf0d-1339aee60099","thread_name":"Review Feishu streaming repatch","updated_at":"2026-03-07T02:05:30.438573Z"}
