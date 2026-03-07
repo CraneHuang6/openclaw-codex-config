@@ -69,4 +69,7 @@ Skills:
 After Gate D2 PASS:
 - MUST execute $CODEX_HOME/superpowers/skills/finishing-a-development-branch/SKILL.md
 - Do not gate the finishing skill on committable state.
+- Default finishing preference is: merge back to `main` locally.
+- If the user explicitly requests PR / keep branch / discard, that explicit choice overrides the default.
+- Default finishing must remain local-only; never push without explicit human confirmation.
 """

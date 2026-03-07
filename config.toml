@@ -4,7 +4,7 @@ model_provider = "qmcode"
 model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 personality = "pragmatic"
-notify = ["bash", "/Users/crane/.codex/hooks/feishu-notify-on-turn.sh"]
+notify = ["bash", "/Users/crane/.codex/hooks/auto-commit-on-turn.sh"]
 # Governance policy: automation monitor must keep OPENCLAW_SKILL_MONITOR_AUTO_FULL_ON_NEW_VERSION=0 by default.
 
 [model_providers.qmcode]

@@ -7,9 +7,9 @@ description: Use when implementation is complete, all tests pass, and you need t
 
 ## Overview
 
-Guide completion of development work by presenting clear options and handling chosen workflow.
+Guide completion of development work by defaulting to the local merge workflow while still honoring explicit user choices.
 
-**Core principle:** Verify tests → Present options → Execute choice → Clean up.
+**Core principle:** Verify tests → Default to local merge → Honor explicit override options → Clean up.
 
 **Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
 
@@ -17,11 +17,11 @@ Guide completion of development work by presenting clear options and handling ch
 
 ### Step 1: Verify Tests
 
-**Before presenting options, verify tests pass:**
+**Before finishing, verify the approved verification commands pass:**
 
 ```bash
-# Run project's test suite
-npm test / cargo test / pytest / go test ./...
+# Run the approved verification command set for this task
+<approved verification commands>
 ```
 
 **If tests fail:**
@@ -46,9 +46,19 @@ git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null
 
 Or ask: "This branch split from main - is that correct?"
 
-### Step 3: Present Options
+If the current branch is already `main`/`master` and there is no separate development branch to finish, report that there is no finishable branch and stop.
 
-Present exactly these 4 options:
+### Step 3: Choose Default Path Or Honor Explicit Override
+
+If the user has already chosen a finish mode, honor that choice.
+
+If the user did **not** choose a finish mode, default to:
+
+```
+1. Merge back to <base-branch> locally
+```
+
+Only present the full choice set when the user explicitly wants to choose or explicitly asks for a different path:
 
 ```
 Implementation complete. What would you like to do?
@@ -61,13 +71,18 @@ Implementation complete. What would you like to do?
 Which option?
 ```
 
-**Don't add explanation** - keep options concise.
+When defaulting to Option 1, say so concisely and continue without waiting for another choice.
 
 ### Step 4: Execute Choice
 
 #### Option 1: Merge Locally
 
 ```bash
+# If the feature branch is dirty, create one local commit first
+git status --short
+git add -A
+git commit -m "<local commit message>"
+
 # Switch to base branch
 git checkout <base-branch>
 
@@ -77,12 +92,14 @@ git pull
 # Merge feature branch
 git merge <feature-branch>
 
-# Verify tests on merged result
-<test command>
+# Verify approved commands on merged result
+<approved verification commands>
 
 # If tests pass
 git branch -d <feature-branch>
 ```
+
+If the feature branch is already clean, skip the local commit step.
 
 Then: Cleanup worktree (Step 5)
 
@@ -160,13 +177,13 @@ git worktree remove <worktree-path>
 
 ## Common Mistakes
 
-**Skipping test verification**
+**Skipping verification**
 - **Problem:** Merge broken code, create failing PR
-- **Fix:** Always verify tests before offering options
+- **Fix:** Always verify the approved commands before finishing
 
-**Open-ended questions**
-- **Problem:** "What should I do next?" → ambiguous
-- **Fix:** Present exactly 4 structured options
+**Forcing a choice when no choice was requested**
+- **Problem:** Default local integration gets delayed for no reason
+- **Fix:** Default to local merge unless the user explicitly asks for another option
 
 **Automatic worktree cleanup**
 - **Problem:** Remove worktree when might need it (Option 2, 3)
