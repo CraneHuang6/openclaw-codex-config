@@ -243,3 +243,7 @@
 {"id":"019cc606-e5fe-7c92-b70e-37b3f319d89d","thread_name":"Monitor worker 019cc606 progress","updated_at":"2026-03-07T02:01:14.860143Z"}
 {"id":"019cc609-6f49-7cc2-8a82-15c6e1e7405b","thread_name":"Add idle backend launchd support","updated_at":"2026-03-07T02:04:00.477557Z"}
 {"id":"019cc60a-ceca-7d50-bf0d-1339aee60099","thread_name":"Review Feishu streaming repatch","updated_at":"2026-03-07T02:05:30.438573Z"}
+{"id":"019cc614-0358-7aa1-b4d9-ad7446ace563","thread_name":"已启用技能`using-superpowers` Add pytest","updated_at":"2026-03-07T02:15:47.706495Z"}
+{"id":"019cc614-e4c5-7be3-9770-5539ac74b7a8","thread_name":"Run opclaw tts tests and status","updated_at":"2026-03-07T02:16:33.59448Z"}
+{"id":"019cc614-dfae-7050-ae3a-ea83c09e9836","thread_name":"Review backend idle reap pre-merge","updated_at":"2026-03-07T02:16:38.470266Z"}
+{"id":"019cc617-1907-7360-8c58-e6b06f4be2ec","thread_name":"Run Feishu verification suite","updated_at":"2026-03-07T02:18:56.362168Z"}
