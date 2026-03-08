@@ -297,6 +297,9 @@ export function extractSentMessageId(rawOutput) {
   try {
     const parsed = typeof rawOutput === "string" ? extractJsonObject(rawOutput) : rawOutput;
     const found = pickFirst(
+      parsed?.payload?.result?.messageId,
+      parsed?.payload?.result?.message_id,
+      parsed?.payload?.result?.id,
       parsed?.payload?.messageId,
       parsed?.payload?.message_id,
       parsed?.payload?.id,
@@ -674,6 +677,7 @@ export class DiscordAppServerBridge {
       questions: record.questions,
       token: record.token,
     });
+    const preSendCursor = String(this.state.lastReadMessageId || "0");
 
     const result = await runCommand(this.openclawBin, [
       "message",
@@ -693,13 +697,91 @@ export class DiscordAppServerBridge {
     }
 
     record.discordMessageId = extractSentMessageId(result.output);
-    record.status = "waiting_reply";
-    record.updatedAt = Date.now();
-    if (!this.state.lastReadMessageId && record.discordMessageId) {
+    const recoveredDiscordMessageId = await this.recoverSentPromptMessageId({
+      extractedId: record.discordMessageId,
+      preSendCursor,
+      requestId: record.requestId,
+    });
+    if (recoveredDiscordMessageId) {
+      if (record.discordMessageId && recoveredDiscordMessageId !== record.discordMessageId) {
+        await this.log("INFO", `prompt canonicalized discordMessageId=${recoveredDiscordMessageId} previous=${record.discordMessageId} request=${requestKey}`);
+      } else if (!record.discordMessageId) {
+        await this.log("INFO", `prompt recovered discordMessageId=${recoveredDiscordMessageId} request=${requestKey}`);
+      }
+      record.discordMessageId = recoveredDiscordMessageId;
+    } else if (!record.discordMessageId) {
+      await this.log("WARN", `prompt fallback token-only request=${requestKey}`);
+    }
+
+    if (!record.discordMessageId) {
+      await this.log("INFO", `prompt sent without messageId; request=${requestKey}`);
+    } else if (!this.state.lastReadMessageId) {
       this.state.lastReadMessageId = record.discordMessageId;
     }
+    record.status = "waiting_reply";
+    record.updatedAt = Date.now();
     await this.persistState();
     await this.log("INFO", `prompt sent request=${requestKey} discordMessageId=${record.discordMessageId || "-"}`);
+  }
+
+  async recoverSentPromptMessageId({ extractedId, preSendCursor, requestId }) {
+    const args = [
+      "message",
+      "read",
+      "--channel",
+      this.channel,
+      "--target",
+      this.target,
+    ];
+
+    if (extractedId) {
+      args.push("--around", String(extractedId));
+    } else {
+      await this.log("INFO", `prompt sent without messageId; attempting read-back recovery request=${requestId} after=${preSendCursor}`);
+      args.push("--after", String(preSendCursor || "0"));
+    }
+    args.push("--json");
+
+    const result = await runCommand(this.openclawBin, args);
+
+    if (!result.ok) {
+      await this.log("WARN", `prompt recovery read failed output=${result.output.replace(/\s+/g, " ").trim()}`);
+      return null;
+    }
+
+    let parsed;
+    try {
+      parsed = extractJsonObject(result.output);
+    } catch (error) {
+      await this.log("WARN", `prompt recovery read parse failed: ${error?.message || error}`);
+      return null;
+    }
+
+    const promptMatches = normalizeReadMessages(parsed)
+      .filter((message) => (
+        String(message.channelId) === String(this.target)
+        && message.isBot === true
+        && String(message.content || "").startsWith("等待回答：Codex request_user_input")
+        && String(message.content || "").includes(`request_id: ${requestId}`)
+      ))
+      .sort((left, right) => compareMessageIds(left.id, right.id));
+
+    if (extractedId) {
+      const nearestPreceding = [...promptMatches]
+        .reverse()
+        .find((message) => compareMessageIds(message.id, String(extractedId)) <= 0);
+      if (nearestPreceding?.id) {
+        return String(nearestPreceding.id);
+      }
+
+      const nearestFollowing = promptMatches
+        .find((message) => compareMessageIds(message.id, String(extractedId)) > 0);
+      return nearestFollowing?.id ? String(nearestFollowing.id) : null;
+    }
+
+    const matched = promptMatches
+      .find((message) => compareMessageIds(message.id, String(preSendCursor || "0")) > 0);
+    return matched?.id ? String(matched.id) : null;
   }
 
   async sendDiscordReply(message, { replyTo } = {}) {
