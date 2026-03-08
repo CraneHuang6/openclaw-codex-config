@@ -1,0 +1,945 @@
+#!/usr/bin/env node
+import fs from "node:fs/promises";
+import fsSync from "node:fs";
+import path from "node:path";
+import readline from "node:readline";
+import { spawn } from "node:child_process";
+import { buildRequestUserInputBody, createReplyToken } from "./codex-notify-common.mjs";
+
+const SESSIONS_ROOT = process.env.CODEX_SESSIONS_ROOT || path.join(process.env.HOME || "", ".codex", "sessions");
+const STATE_FILE = process.env.CODEX_NOTIFY_STATE_FILE || path.join(process.env.HOME || "", ".codex", "tmp", "codex-notify-state.json");
+const SEND_SCRIPT = process.env.CODEX_NOTIFY_SEND_SCRIPT || path.join(process.env.HOME || "", ".codex", "scripts", "codex-notify-send.sh");
+const LOG_FILE = process.env.CODEX_NOTIFY_LOG_FILE || path.join(process.env.HOME || "", ".codex", "log", "codex-notify.log");
+const PRECHECK_CHANNEL = process.env.CODEX_NOTIFY_CHANNEL || "discord";
+const PRECHECK_TARGET = process.env.CODEX_NOTIFY_TARGET || "1480021215044440145";
+const DEDUPE_TTL_SECONDS = 6 * 3600;
+const POLL_MS = Number(process.env.CODEX_NOTIFY_POLL_MS || "2000");
+const COMPLETION_QUIET_MS = Number(process.env.CODEX_NOTIFY_COMPLETION_QUIET_MS || "20000");
+const USER_INPUT_TURN_LIMIT = Number(process.env.CODEX_NOTIFY_USER_INPUT_TURN_LIMIT || "64");
+const META_SCAN_CHUNK_BYTES = Number(process.env.CODEX_NOTIFY_META_SCAN_CHUNK_BYTES || "8192");
+const META_SCAN_MAX_BYTES = Number(process.env.CODEX_NOTIFY_META_SCAN_MAX_BYTES || "1048576");
+const READ_HISTORY = process.env.CODEX_NOTIFY_READ_HISTORY === "1";
+const LOCK_DIR = `${STATE_FILE}.lock`;
+const LEGACY_INBOUND_PATTERNS = [
+  /Feishu\[[^\]]+\]\s*DM\s+from/i,
+  /System:\s*\[[^\]]+\]\s*Feishu\[[^\]]+\]/i,
+];
+
+const fileState = new Map();
+const pendingCompletions = new Map();
+
+function nowSeconds() {
+  return Math.floor(Date.now() / 1000);
+}
+
+async function ensureParent(filePath) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+}
+
+async function log(level, message) {
+  const line = `[${new Date().toISOString()}] [${level}] ${message}\n`;
+  await ensureParent(LOG_FILE);
+  await fs.appendFile(LOG_FILE, line, "utf8");
+}
+
+function truncateSummary(raw) {
+  if (!raw) return "-";
+  const compact = String(raw).replace(/\s+/g, " ").trim();
+  if (compact.length <= 120) return compact;
+  return `${compact.slice(0, 120)}...`;
+}
+
+function shanghaiTimeString() {
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date());
+}
+
+async function runCommand(cmd, args, options = {}) {
+  return await new Promise((resolve) => {
+    const child = spawn(cmd, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...options,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
+    child.on("close", (code) => {
+      resolve({ ok: code === 0, code: code ?? 1, stdout, stderr, output: `${stdout}${stderr}` });
+    });
+    child.on("error", (err) => {
+      resolve({ ok: false, code: 1, stdout, stderr: String(err), output: `${stdout}${stderr}${String(err)}` });
+    });
+  });
+}
+
+async function preflightNotify() {
+  const args = [
+    "message",
+    "send",
+    "--channel",
+    PRECHECK_CHANNEL,
+    "--target",
+    PRECHECK_TARGET,
+    "--message",
+    `codex-notify preflight ${new Date().toISOString()}`,
+    "--dry-run",
+    "--json",
+  ];
+
+  let result = await runCommand("openclaw", args);
+  if (result.ok) {
+    await log("INFO", "preflight ok");
+    return true;
+  }
+
+  const compact = truncateSummary(result.output);
+  await log("ERROR", `preflight failed: ${compact}`);
+  return false;
+}
+
+async function sleep(ms) {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+async function withStateLock(fn) {
+  await ensureParent(STATE_FILE);
+  for (let i = 0; i < 120; i += 1) {
+    try {
+      await fs.mkdir(LOCK_DIR);
+      break;
+    } catch (err) {
+      if (err && err.code === "EEXIST") {
+        await sleep(50);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    try {
+      await fs.rmdir(LOCK_DIR);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function loadState() {
+  try {
+    const raw = await fs.readFile(STATE_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || typeof parsed.keys !== "object") {
+      return { version: 1, keys: {} };
+    }
+    return parsed;
+  } catch {
+    return { version: 1, keys: {} };
+  }
+}
+
+async function saveState(state) {
+  const tmpPath = `${STATE_FILE}.tmp`;
+  await fs.writeFile(tmpPath, JSON.stringify(state), "utf8");
+  await fs.rename(tmpPath, STATE_FILE);
+}
+
+async function dedupeAllow(key) {
+  return await withStateLock(async () => {
+    const state = await loadState();
+    const now = nowSeconds();
+
+    for (const [k, ts] of Object.entries(state.keys)) {
+      if (typeof ts !== "number" || now - ts > DEDUPE_TTL_SECONDS) {
+        delete state.keys[k];
+      }
+    }
+
+    if (state.keys[key]) {
+      await saveState(state);
+      return false;
+    }
+
+    state.keys[key] = now;
+    await saveState(state);
+    return true;
+  });
+}
+
+function buildBody(n) {
+  if (n.kind === "user_input") {
+    const token = n.replyToken || createReplyToken({
+      threadId: n.threadId,
+      turnId: n.turnId,
+      itemId: n.callId,
+      questions: n.questions,
+    });
+    return [
+      `时间: ${shanghaiTimeString()} (Asia/Shanghai)`,
+      `线程ID: ${n.threadId || "-"}`,
+      `回合ID: ${n.turnId || "-"}`,
+      `请求ID: ${n.callId || "-"}`,
+      `目录: ${n.cwd || "-"}`,
+      "",
+      buildRequestUserInputBody({ questions: n.questions, token }),
+    ].join("\n");
+  }
+
+  return [
+    `时间: ${shanghaiTimeString()} (Asia/Shanghai)`,
+    `线程ID: ${n.threadId || "-"}`,
+    `回合ID: ${n.turnId || "-"}`,
+    `目录: ${n.cwd || "-"}`,
+    `摘要: ${truncateSummary(n.summary)}`,
+  ].join("\n");
+}
+
+async function sendNotification(n) {
+  const allowed = await dedupeAllow(n.dedupeKey);
+  if (!allowed) {
+    await log("INFO", `dedupe skip key=${n.dedupeKey}`);
+    return;
+  }
+
+  const body = buildBody(n);
+  const result = await runCommand(SEND_SCRIPT, ["--title", n.title, "--body", body]);
+  if (!result.ok) {
+    await log("ERROR", `send failed key=${n.dedupeKey} output=${truncateSummary(result.output)}`);
+    return;
+  }
+
+  await log("INFO", `sent key=${n.dedupeKey} title=${n.title}`);
+}
+
+function queueCompletionNotification(n) {
+  const threadId = n.threadId || "-";
+  pendingCompletions.set(threadId, {
+    threadId,
+    turnId: n.turnId || "-",
+    eventType: n.eventType || "task_complete",
+    cwd: n.cwd || "",
+    summary: n.summary || "",
+    seenAtMs: Date.now(),
+    notification: n,
+  });
+}
+
+async function flushPendingCompletions(force = false) {
+  const nowMs = Date.now();
+  for (const [threadId, candidate] of pendingCompletions.entries()) {
+    if (!force && nowMs - candidate.seenAtMs < COMPLETION_QUIET_MS) continue;
+    await sendNotification(candidate.notification);
+    pendingCompletions.delete(threadId);
+  }
+}
+
+async function routeNotification(n, source) {
+  if (!n) return;
+  if (n.kind === "task_complete") {
+    queueCompletionNotification(n);
+    await log("INFO", `queue completion source=${source} thread=${n.threadId || "-"} turn=${n.turnId || "-"}`);
+    return;
+  }
+  await sendNotification(n);
+}
+
+function normalizeKind(kind, eventType, threadId, turnId, callId, cwd, summary, extra = {}) {
+  if (!threadId) threadId = "-";
+  if (!turnId) turnId = "-";
+
+  let title;
+  let dedupeKey;
+
+  if (kind === "authorization") {
+    title = "Codex 等待你授权";
+    dedupeKey = `${threadId}:${turnId}:${eventType || "approval"}:${callId || "-"}`;
+  } else if (kind === "user_input") {
+    title = "Codex 等待你回答";
+    dedupeKey = `${threadId}:${turnId}:request_user_input:${callId || "-"}`;
+  } else {
+    title = "Codex 任务完成";
+    dedupeKey = eventType === "agent-turn-complete"
+      ? `notify:${threadId}:${turnId}:agent-turn-complete`
+      : `${threadId}:${turnId}:task_complete`;
+  }
+
+  return {
+    kind,
+    eventType,
+    title,
+    dedupeKey,
+    threadId,
+    turnId,
+    callId,
+    cwd,
+    summary,
+    ...extra,
+  };
+}
+
+function parseThreadIdFromPath(filePath) {
+  const m = filePath.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
+  return m ? m[1] : "-";
+}
+
+function isLegacyInboundText(raw) {
+  if (!raw) return false;
+  const text = String(raw);
+  return LEGACY_INBOUND_PATTERNS.some((re) => re.test(text));
+}
+
+function isLegacyInboundRolloutLine(obj) {
+  if (!obj || typeof obj !== "object") return false;
+
+  if (obj.type === "event_msg" && obj.payload?.type === "user_message") {
+    return isLegacyInboundText(obj.payload?.message);
+  }
+
+  if (obj.type === "response_item" && obj.payload?.type === "message" && obj.payload?.role === "user") {
+    const content = Array.isArray(obj.payload?.content) ? obj.payload.content : [];
+    return content.some((c) => isLegacyInboundText(c?.text));
+  }
+
+  return false;
+}
+
+function isLegacyInboundNotifyPayload(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  if (isLegacyInboundText(payload["last-assistant-message"])) return true;
+  const inputMessages = Array.isArray(payload["input-messages"]) ? payload["input-messages"] : [];
+  return inputMessages.some((m) => isLegacyInboundText(m));
+}
+
+function normalizeTurnId(turnId) {
+  if (!turnId) return "";
+  const t = String(turnId).trim();
+  return t && t !== "-" ? t : "";
+}
+
+function ensureUserInputState(state) {
+  if (!(state.userInputTurns instanceof Set)) {
+    state.userInputTurns = new Set(Array.isArray(state.userInputTurnOrder) ? state.userInputTurnOrder : []);
+  }
+  if (!Array.isArray(state.userInputTurnOrder)) {
+    state.userInputTurnOrder = Array.from(state.userInputTurns);
+  }
+  if (typeof state.pendingUserInputWithoutTurn !== "boolean") {
+    state.pendingUserInputWithoutTurn = false;
+  }
+}
+
+function markUserInputTurn(state, turnId) {
+  ensureUserInputState(state);
+  const t = normalizeTurnId(turnId);
+  if (!t) {
+    state.pendingUserInputWithoutTurn = true;
+    return;
+  }
+  if (state.userInputTurns.has(t)) return;
+
+  state.userInputTurns.add(t);
+  state.userInputTurnOrder.push(t);
+  state.pendingUserInputWithoutTurn = false;
+
+  const limit = Math.max(1, USER_INPUT_TURN_LIMIT);
+  while (state.userInputTurnOrder.length > limit) {
+    const oldest = state.userInputTurnOrder.shift();
+    if (!oldest) continue;
+    state.userInputTurns.delete(oldest);
+  }
+}
+
+function hasUserInputTurn(state, turnId) {
+  const t = normalizeTurnId(turnId);
+  if (!t) return false;
+  ensureUserInputState(state);
+  return state.userInputTurns.has(t);
+}
+
+function applySessionMetaToState(state, payload) {
+  if (!payload || typeof payload !== "object") return false;
+
+  if (payload.id) state.threadId = payload.id;
+  if (payload.cwd && !state.cwd) state.cwd = payload.cwd;
+
+  const spawn = payload.source?.subagent?.thread_spawn;
+  if (spawn && typeof spawn === "object") {
+    state.isSubagent = true;
+    state.parentThreadId = spawn.parent_thread_id || "";
+    const depth = Number(spawn.depth);
+    state.spawnDepth = Number.isFinite(depth) ? depth : null;
+  } else {
+    state.isSubagent = false;
+    state.parentThreadId = "";
+    state.spawnDepth = null;
+  }
+
+  state.metaHydrated = true;
+  return true;
+}
+
+async function hydrateRolloutMeta(filePath, entrySize, state, options = {}) {
+  const force = options.force === true;
+  if (state.metaHydrated && !force) return;
+
+  let fd;
+  try {
+    fd = await fs.open(filePath, "r");
+    let size = entrySize;
+    if (typeof size !== "number") {
+      const st = await fd.stat();
+      size = st.size;
+    }
+
+    const chunkBytes = Math.max(1, META_SCAN_CHUNK_BYTES);
+    const maxBytes = Math.max(1, META_SCAN_MAX_BYTES);
+    const scanLimit = Math.min(size, maxBytes);
+    if (scanLimit <= 0) {
+      state.metaHydrated = true;
+      return;
+    }
+
+    let offset = 0;
+    let bytesScanned = 0;
+    let remainder = "";
+
+    while (offset < size && bytesScanned < scanLimit) {
+      const toRead = Math.min(chunkBytes, scanLimit - bytesScanned);
+      if (toRead <= 0) break;
+
+      const buf = Buffer.alloc(toRead);
+      const readRes = await fd.read(buf, 0, toRead, offset);
+      const bytesRead = readRes?.bytesRead || 0;
+      if (bytesRead <= 0) break;
+
+      offset += bytesRead;
+      bytesScanned += bytesRead;
+      remainder += buf.toString("utf8", 0, bytesRead);
+
+      const lines = remainder.split("\n");
+      remainder = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let obj;
+        try {
+          obj = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (obj.type !== "session_meta") continue;
+        applySessionMetaToState(state, obj.payload);
+        return;
+      }
+    }
+
+    state.metaHydrated = true;
+    if (!state.metaScanIncompleteLogged) {
+      state.metaScanIncompleteLogged = true;
+      await log("WARN", `meta_scan_incomplete thread=${state.threadId || "-"} file=${path.basename(filePath)} bytes_scanned=${bytesScanned}`);
+    }
+  } catch (err) {
+    state.metaHydrated = true;
+    await log("WARN", `hydrate session_meta failed file=${path.basename(filePath)} err=${truncateSummary(err?.message || err)}`);
+  } finally {
+    if (fd) {
+      try {
+        await fd.close();
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+function fromRolloutEvent(payload, threadId, cwd) {
+  const t = payload?.type;
+  if (!t) return null;
+
+  if (t === "exec_approval_request" || t === "apply_patch_approval_request") {
+    return normalizeKind(
+      "authorization",
+      t,
+      threadId,
+      payload.turn_id,
+      payload.call_id,
+      cwd || payload.cwd,
+      payload.reason || payload.command?.join(" ") || payload.command,
+    );
+  }
+
+  if (t === "request_user_input") {
+    const questions = Array.isArray(payload.questions) ? payload.questions : [];
+    const summary = questions.length > 0
+      ? questions.map((q) => q.question || "").filter(Boolean).join(" / ")
+      : "request_user_input";
+    return normalizeKind("user_input", t, threadId, payload.turn_id, payload.call_id, cwd, summary, { questions });
+  }
+
+  if (t === "task_complete") {
+    return normalizeKind("task_complete", t, threadId, payload.turn_id, null, cwd, payload.last_agent_message);
+  }
+
+  return null;
+}
+
+function fromRolloutResponseItem(payload, threadId, turnId, cwd) {
+  if (!payload || payload.type !== "function_call") return null;
+  if (payload.name !== "request_user_input") return null;
+
+  let args = {};
+  if (typeof payload.arguments === "string" && payload.arguments.trim()) {
+    try {
+      args = JSON.parse(payload.arguments);
+    } catch {
+      args = {};
+    }
+  } else if (payload.arguments && typeof payload.arguments === "object") {
+    args = payload.arguments;
+  }
+
+  const questions = Array.isArray(args.questions) ? args.questions : [];
+  const summary = questions.length > 0
+    ? questions.map((q) => q?.question || "").filter(Boolean).join(" / ")
+    : "request_user_input";
+
+  return normalizeKind(
+    "user_input",
+    "request_user_input",
+    threadId,
+    turnId,
+    payload.call_id,
+    cwd,
+    summary,
+    { questions },
+  );
+}
+
+function fromNotifyPayload(payload) {
+  if (!payload || payload.type !== "agent-turn-complete") return null;
+  const summary = payload["last-assistant-message"] || (payload["input-messages"] || []).join(" ");
+  return normalizeKind(
+    "task_complete",
+    "agent-turn-complete",
+    payload["thread-id"],
+    payload["turn-id"],
+    null,
+    payload.cwd,
+    summary,
+  );
+}
+
+function fromAppserverMessage(obj) {
+  const method = obj?.method;
+  if (!method) return null;
+
+  if (method === "codex/event/exec_approval_request" || method === "codex/event/apply_patch_approval_request") {
+    const msg = obj.params?.msg || {};
+    return normalizeKind(
+      "authorization",
+      msg.type || method,
+      obj.params?.conversationId || msg.thread_id,
+      msg.turn_id,
+      msg.call_id,
+      msg.cwd,
+      msg.reason || msg.command?.join(" ") || msg.command,
+    );
+  }
+
+  if (method === "codex/event/request_user_input") {
+    const msg = obj.params?.msg || {};
+    const questions = Array.isArray(msg.questions) ? msg.questions : [];
+    const summary = questions.length > 0 ? questions.map((q) => q.question || "").filter(Boolean).join(" / ") : "request_user_input";
+    return normalizeKind(
+      "user_input",
+      msg.type || method,
+      obj.params?.conversationId,
+      msg.turn_id,
+      msg.call_id,
+      obj.params?.cwd,
+      summary,
+      { questions },
+    );
+  }
+
+  if (method === "codex/event/task_complete") {
+    const msg = obj.params?.msg || {};
+    return normalizeKind(
+      "task_complete",
+      msg.type || method,
+      obj.params?.conversationId,
+      msg.turn_id || obj.params?.id,
+      null,
+      obj.params?.cwd,
+      msg.last_agent_message,
+    );
+  }
+
+  if (method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval") {
+    const p = obj.params || {};
+    return normalizeKind("authorization", method, p.threadId, p.turnId, p.itemId, p.cwd, p.reason || p.command);
+  }
+
+  if (method === "item/tool/requestUserInput") {
+    const p = obj.params || {};
+    const questions = Array.isArray(p.questions) ? p.questions : [];
+    const summary = questions.length > 0 ? questions.map((q) => q.question || "").filter(Boolean).join(" / ") : "request_user_input";
+    return normalizeKind("user_input", method, p.threadId, p.turnId, p.itemId, p.cwd, summary, { questions });
+  }
+
+  return null;
+}
+
+async function collectRolloutFiles(root) {
+  const out = [];
+  const years = await safeReadDir(root);
+  for (const y of years) {
+    if (!y.isDirectory()) continue;
+    const yearPath = path.join(root, y.name);
+    const months = await safeReadDir(yearPath);
+    for (const m of months) {
+      if (!m.isDirectory()) continue;
+      const monthPath = path.join(yearPath, m.name);
+      const days = await safeReadDir(monthPath);
+      for (const d of days) {
+        if (!d.isDirectory()) continue;
+        const dayPath = path.join(monthPath, d.name);
+        const files = await safeReadDir(dayPath);
+        for (const f of files) {
+          if (!f.isFile()) continue;
+          if (!f.name.startsWith("rollout-") || !f.name.endsWith(".jsonl")) continue;
+          const p = path.join(dayPath, f.name);
+          try {
+            const st = await fs.stat(p);
+            out.push({ path: p, mtimeMs: st.mtimeMs, size: st.size });
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+  }
+
+  out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return out.slice(0, 400);
+}
+
+async function safeReadDir(dir) {
+  try {
+    return await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+async function processRolloutFile(entry) {
+  const s = fileState.get(entry.path) || {
+    offset: READ_HISTORY ? 0 : entry.size,
+    remainder: "",
+    threadId: parseThreadIdFromPath(entry.path),
+    currentTurnId: "",
+    turnId: "",
+    cwd: "",
+    feishuInbound: false,
+    feishuInboundLogged: false,
+    isSubagent: null,
+    parentThreadId: "",
+    spawnDepth: null,
+    metaHydrated: false,
+    metaUnknownLogged: false,
+    metaScanIncompleteLogged: false,
+    userInputTurns: new Set(),
+    userInputTurnOrder: [],
+    pendingUserInputWithoutTurn: false,
+  };
+
+  ensureUserInputState(s);
+  await hydrateRolloutMeta(entry.path, entry.size, s);
+
+  if (entry.size < s.offset) {
+    s.offset = 0;
+    s.remainder = "";
+  }
+
+  if (entry.size === s.offset) {
+    fileState.set(entry.path, s);
+    return;
+  }
+
+  const fd = await fs.open(entry.path, "r");
+  try {
+    const length = entry.size - s.offset;
+    const buf = Buffer.alloc(length);
+    await fd.read(buf, 0, length, s.offset);
+    s.offset = entry.size;
+
+    const merged = s.remainder + buf.toString("utf8");
+    const lines = merged.split("\n");
+    s.remainder = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      if (isLegacyInboundRolloutLine(obj)) {
+        s.feishuInbound = true;
+        if (!s.feishuInboundLogged) {
+          s.feishuInboundLogged = true;
+          await log("INFO", `mark legacy inbound thread=${s.threadId} file=${path.basename(entry.path)}`);
+        }
+      }
+
+      if (obj.type === "turn_context") {
+        if (obj.payload?.turn_id) {
+          s.turnId = obj.payload.turn_id;
+          s.currentTurnId = obj.payload.turn_id;
+          if (s.pendingUserInputWithoutTurn) {
+            markUserInputTurn(s, s.currentTurnId);
+          }
+        }
+        if (obj.payload?.cwd) s.cwd = obj.payload.cwd;
+        continue;
+      }
+
+      if (obj.type === "session_meta") {
+        applySessionMetaToState(s, obj.payload);
+        continue;
+      }
+
+      if (obj.type === "response_item") {
+        if (obj.payload?.type === "message" && obj.payload?.role === "user") {
+          markUserInputTurn(s, s.currentTurnId);
+        }
+
+        const n = fromRolloutResponseItem(obj.payload, s.threadId, s.turnId, s.cwd);
+        if (!n) continue;
+        if (n.kind === "user_input") {
+          if (s.isSubagent === null) {
+            await log("INFO", `meta_hydrate_retry_on_user_input thread=${s.threadId} file=${path.basename(entry.path)}`);
+            await hydrateRolloutMeta(entry.path, entry.size, s, { force: true });
+          }
+          if (s.isSubagent === true) {
+            await log(
+              "INFO",
+              `skip user_input for subagent thread=${s.threadId} turn=${n.turnId || "-"} call=${n.callId || "-"} parent=${s.parentThreadId || "-"} depth=${s.spawnDepth ?? "-"}`,
+            );
+            continue;
+          }
+          if (s.isSubagent !== false) {
+            await log(
+              "WARN",
+              `meta_unknown for user_input, skipped thread=${s.threadId} turn=${n.turnId || "-"} call=${n.callId || "-"} file=${path.basename(entry.path)}`,
+            );
+            continue;
+          }
+        }
+        await routeNotification(n, "rollout-response_item");
+        continue;
+      }
+
+      if (obj.type !== "event_msg") continue;
+      if (obj.payload?.type === "user_message") {
+        const eventTurnId = obj.payload?.turn_id || s.currentTurnId;
+        markUserInputTurn(s, eventTurnId);
+      }
+      const n = fromRolloutEvent(obj.payload, s.threadId, s.cwd);
+      if (!n) continue;
+      if (n.kind === "user_input") {
+        if (s.isSubagent === null) {
+          await log("INFO", `meta_hydrate_retry_on_user_input thread=${s.threadId} file=${path.basename(entry.path)}`);
+          await hydrateRolloutMeta(entry.path, entry.size, s, { force: true });
+        }
+        if (s.isSubagent === true) {
+          await log(
+            "INFO",
+            `skip user_input for subagent thread=${s.threadId} turn=${n.turnId || "-"} call=${n.callId || "-"} parent=${s.parentThreadId || "-"} depth=${s.spawnDepth ?? "-"}`,
+          );
+          continue;
+        }
+        if (s.isSubagent !== false) {
+          await log(
+            "WARN",
+            `meta_unknown for user_input, skipped thread=${s.threadId} turn=${n.turnId || "-"} call=${n.callId || "-"} file=${path.basename(entry.path)}`,
+          );
+          continue;
+        }
+      }
+
+      if (n.kind === "task_complete") {
+        const completionTurnId = normalizeTurnId(n.turnId);
+
+        if (s.isSubagent === null) {
+          await log("INFO", `meta_hydrate_retry_on_task_complete thread=${s.threadId} file=${path.basename(entry.path)}`);
+          await hydrateRolloutMeta(entry.path, entry.size, s, { force: true });
+        }
+
+        if (s.isSubagent === true) {
+          await log("INFO", `skip task_complete for subagent thread=${s.threadId} parent=${s.parentThreadId || "-"} depth=${s.spawnDepth ?? "-"}`);
+          continue;
+        }
+
+        if (s.isSubagent !== false && !s.metaUnknownLogged) {
+          s.metaUnknownLogged = true;
+          await log("WARN", `task_complete meta_unknown thread=${s.threadId} file=${path.basename(entry.path)} default=main-thread`);
+        }
+
+        if (s.feishuInbound) {
+          await log("INFO", `skip task_complete for legacy inbound thread=${s.threadId} turn=${n.turnId || "-"}`);
+          continue;
+        }
+
+        if (!hasUserInputTurn(s, completionTurnId)) {
+          await log("INFO", `skip task_complete without_user_input thread=${s.threadId} turn=${completionTurnId || n.turnId || "-"}`);
+          continue;
+        }
+      }
+
+      await routeNotification(n, "rollout-event_msg");
+    }
+  } finally {
+    await fd.close();
+    fileState.set(entry.path, s);
+  }
+}
+
+async function runRolloutMode() {
+  const preflightOk = await preflightNotify();
+  if (!preflightOk) {
+    await log("ERROR", "rollout mode stopped due to preflight failure");
+    process.exit(2);
+  }
+
+  await log("INFO", `rollout mode started root=${SESSIONS_ROOT}`);
+
+  while (true) {
+    const entries = await collectRolloutFiles(SESSIONS_ROOT);
+    const keep = new Set(entries.map((e) => e.path));
+
+    for (const e of entries) {
+      await processRolloutFile(e);
+    }
+
+    for (const k of fileState.keys()) {
+      if (!keep.has(k)) fileState.delete(k);
+    }
+
+    await flushPendingCompletions(false);
+    await sleep(POLL_MS);
+  }
+}
+
+async function runAppserverMode() {
+  const preflightOk = await preflightNotify();
+  if (!preflightOk) {
+    await log("ERROR", "appserver mode stopped due to preflight failure");
+    process.exit(2);
+  }
+
+  await log("INFO", "appserver mode started (reading JSON lines from stdin)");
+  const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  const flushTimer = setInterval(() => {
+    void flushPendingCompletions(false);
+  }, Math.min(Math.max(POLL_MS, 500), 2000));
+  flushTimer.unref?.();
+
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const n = fromAppserverMessage(obj);
+      if (!n) continue;
+      await routeNotification(n, "appserver");
+    }
+  } finally {
+    clearInterval(flushTimer);
+    await flushPendingCompletions(true);
+  }
+}
+
+async function runNotifyMode() {
+  const payloadRaw = process.env.CODEX_NOTIFY_PAYLOAD || "";
+  if (!payloadRaw) {
+    await log("WARN", "notify mode without CODEX_NOTIFY_PAYLOAD");
+    return;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(payloadRaw);
+  } catch {
+    await log("ERROR", "notify payload is not valid JSON");
+    return;
+  }
+
+  const n = fromNotifyPayload(payload);
+  if (!n) return;
+  if (n.kind === "task_complete") {
+    await log("INFO", `notify completion ignored; rollout aggregator authoritative thread=${n.threadId || "-"} turn=${n.turnId || "-"}`);
+    return;
+  }
+  await sendNotification(n);
+}
+
+async function main() {
+  const modeIdx = process.argv.indexOf("--mode");
+  const mode = modeIdx >= 0 ? process.argv[modeIdx + 1] : "rollout";
+
+  await ensureParent(STATE_FILE);
+  await ensureParent(LOG_FILE);
+
+  if (!fsSync.existsSync(SEND_SCRIPT)) {
+    await log("ERROR", `send script missing: ${SEND_SCRIPT}`);
+    process.exit(2);
+  }
+
+  if (mode === "rollout") {
+    await runRolloutMode();
+    return;
+  }
+  if (mode === "appserver") {
+    await runAppserverMode();
+    return;
+  }
+  if (mode === "notify") {
+    await runNotifyMode();
+    return;
+  }
+
+  await log("ERROR", `unknown mode: ${mode}`);
+  process.exit(2);
+}
+
+main().catch(async (err) => {
+  try {
+    await log("ERROR", `fatal: ${err?.stack || err}`);
+  } catch {
+    // ignore
+  }
+  process.exit(1);
+});
