@@ -46,7 +46,7 @@ fi
 
 mm_require_cmd git
 mm_require_cmd python3
-REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+REPO_ROOT="$(mm_skill_owner_root "$SCRIPT_DIR")"
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 INVENTORY_JSON="$TEMP_DIR/inventory.json"

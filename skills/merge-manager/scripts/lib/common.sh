@@ -29,3 +29,11 @@ mm_repo_root() {
 mm_sanitize_name() {
   printf '%s' "$1" | sed 's#[/: ]#_#g'
 }
+
+mm_skill_owner_root() {
+  local script_dir="$1"
+  local owner_root
+  owner_root="$(cd "$script_dir/../../.." && pwd)"
+  [[ -f "$owner_root/AGENTS.md" ]] || mm_die "failed to resolve owning repo root from skill path: $script_dir"
+  printf '%s\n' "$owner_root"
+}
