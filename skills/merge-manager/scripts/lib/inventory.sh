@@ -37,6 +37,21 @@ mm_inventory_candidates() {
   rm -f "$tmp"
 }
 
+mm_worktree_branch_locations() {
+  local repo_root="$1"
+  git -C "$repo_root" worktree list --porcelain | awk '
+    $1 == "worktree" {
+      path = substr($0, 10)
+      next
+    }
+    $1 == "branch" && $2 ~ /^refs\/heads\// {
+      branch = $2
+      sub(/^refs\/heads\//, "", branch)
+      print branch "\t" path
+    }
+  '
+}
+
 mm_branch_changed_files() {
   local repo_root="$1"
   local base="$2"

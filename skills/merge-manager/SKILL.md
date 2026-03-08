@@ -81,9 +81,18 @@ bash /Users/crane/.codex/skills/merge-manager/scripts/run_merge_manager.sh \
 报告固定包含：
 - assumptions
 - candidate_branches
+- filtered_out
 - merge_order
 - branch states (`ready / blocked / manual_review / stale`)
 - validation_summary
 - blockers
 - next_action
 - exact next command for legacy real execution
+
+## Phase 2 Notes
+
+phase 2 dry-run 额外要求：
+- 过滤任一 worktree 当前 checkout 的分支
+- 过滤已经并入 base 的本地分支
+- validation command detection 采用显式优先 + 保守 root-only 自动探测
+- 不递归 nested repos 寻找验证命令

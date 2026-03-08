@@ -37,6 +37,21 @@
 - 当前关闭：`--mode execute`（明确返回 `not enabled in MVP`）
 - future execute 需要额外 Gate 审核与 isolated worktree 执行
 
+## Phase 2 Filtering
+
+phase 2 的 dry-run 会额外过滤：
+- 任一 git worktree 当前正在 checkout 的分支
+- 已经并入 base 的本地分支
+
+这些分支不会进入 `candidate_branches`，但会在 Markdown + JSON 报告的 `filtered_out` 中保留原因，便于审计。
+
+## Validation Detection
+
+validation command detection 采用“显式优先 + 保守自动探测”：
+- 先使用 policy 中显式声明且在仓库根可执行的命令
+- 若未命中且 `detect_if_missing: true`，再尝试根目录 manifest 对应命令
+- 仍未命中时，只尝试 policy 允许的 root-only 保守脚本，不递归 nested repos
+
 ## Multi-Agent Mapping
 
 - `Orchestrator`: 汇总输入、Root Cause Matrix、merge order、最终报告
