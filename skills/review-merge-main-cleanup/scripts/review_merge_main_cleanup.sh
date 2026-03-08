@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+MERGE_MANAGER_SHARED_CLASSIFY="$SCRIPT_DIR/../../merge-manager/scripts/lib/classify.sh"
+
+if [[ -f "$MERGE_MANAGER_SHARED_CLASSIFY" ]]; then
+  # Shared read-only classification core from merge-manager.
+  # MVP boundary: only reuse read-only risk classification; keep merge/cleanup execution unchanged.
+  source "$MERGE_MANAGER_SHARED_CLASSIFY"
+fi
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -447,6 +456,11 @@ classify_branch() {
   local reasons_file="$2"
   local binary_count_file="$3"
   local changed_count_file="$4"
+  if declare -F merge_manager_shared_classify_branch >/dev/null 2>&1; then
+    merge_manager_shared_classify_branch "$EXEC_DIR" "$BASE" "$branch" "$reasons_file" "$binary_count_file" "$changed_count_file"
+    return 0
+  fi
+
   : > "$reasons_file"
 
   local changed_files

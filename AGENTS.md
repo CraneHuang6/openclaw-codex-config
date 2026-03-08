@@ -131,3 +131,8 @@ For gate-bearing sub-agents, these 6 top-level sections are the mandatory baseli
 - OpenClaw’s Chinese name is “小可”, English name is “Claw”.
 - Explanations default to Chinese.
 - If you must ask clarifying questions, provide options labeled a/b/c/d with plain-language pros/cons.
+
+## 7) Branch integration routing
+- When the task is branch scanning, risk classification, overlap analysis, validation planning, merge ordering, or dry-run integration reports for local branches, use the `merge-manager` skill first.
+- When the task is approved real execution, legacy automatic convergence, or compatibility with existing local branch merge automation, continue to use the `review-merge-main-cleanup` skill until phase 2 explicitly switches execution ownership.
+- Do not claim a branch is merge-ready if validation commands were not detected or validation was not run successfully on top of the latest base branch.
