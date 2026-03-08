@@ -20,6 +20,20 @@ def category_rank(category: str) -> int:
     }.get(category, 2)
 
 
+def format_filter_reason(item: dict) -> str:
+    reasons = item.get("filter_reasons", [])
+    labels = []
+    if "checked_out_in_worktree" in reasons:
+        worktrees = item.get("checked_out_worktrees", [])
+        if worktrees:
+            labels.append(f"checked out in worktree: {', '.join(worktrees)}")
+        else:
+            labels.append("checked out in worktree")
+    if "already_merged" in reasons:
+        labels.append("already merged into base")
+    return "; ".join(labels) or "filtered by policy"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--inventory", required=True)
@@ -103,10 +117,11 @@ def main() -> int:
         )
 
     merge_order = [
-        r["branch"]
-        for r in sorted(records, key=lambda r: (category_rank(r["classification"]["category"]), r["behind"], r["branch"]))
+        record["branch"]
+        for record in sorted(records, key=lambda record: (category_rank(record["classification"]["category"]), record["behind"], record["branch"]))
     ]
-    blockers = [{"branch": r["branch"], "state": r["state"], "reason": r["blocker"]} for r in records if r["state"] != "ready"]
+    blockers = [{"branch": record["branch"], "state": record["state"], "reason": record["blocker"]} for record in records if record["state"] != "ready"]
+    filtered_out = inventory.get("filtered_out", [])
 
     report = {
         "assumptions": {
@@ -117,7 +132,8 @@ def main() -> int:
             "mode": "dry-run",
             "legacy_execute_entrypoint": args.legacy_command,
         },
-        "candidate_branches": [r["branch"] for r in records],
+        "candidate_branches": [record["branch"] for record in records],
+        "filtered_out": filtered_out,
         "merge_order": merge_order,
         "branches": records,
         "blockers": blockers,
@@ -139,11 +155,19 @@ def main() -> int:
         md_lines.extend([f"- `{branch}`" for branch in report["candidate_branches"]])
     else:
         md_lines.append("- none")
+
+    md_lines.extend(["", "## Filtered Out"])
+    if filtered_out:
+        md_lines.extend([f"- `{item['branch']}`: {format_filter_reason(item)}" for item in filtered_out])
+    else:
+        md_lines.append("- none")
+
     md_lines.extend(["", "## Merge Order"])
     if merge_order:
         md_lines.extend([f"{index + 1}. `{branch}`" for index, branch in enumerate(merge_order)])
     else:
         md_lines.append("1. none")
+
     md_lines.extend([
         "",
         "## Summary Table",
@@ -157,11 +181,13 @@ def main() -> int:
         md_lines.append(
             f"| `{row['branch']}` | `{row['risk_level']}` | `{row['state']}` | {overlap_summary} | {row['validation_summary']} | {row['merge_result']} | {blocker} | {row['next_action']} |"
         )
+
     md_lines.extend(["", "## Blockers"])
     if blockers:
         md_lines.extend([f"- `{item['branch']}`: `{item['state']}` — {item['reason']}" for item in blockers])
     else:
         md_lines.append("- none")
+
     md_lines.extend(["", "## Exact Next Command", "```bash", args.legacy_command, "```", ""])
 
     Path(args.json).write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
