@@ -46,7 +46,8 @@ fi
 
 mm_require_cmd git
 mm_require_cmd python3
-REPO_ROOT="$(mm_skill_owner_root "$SCRIPT_DIR")"
+SKILL_OWNER_ROOT="$(mm_skill_owner_root "$SCRIPT_DIR")"
+REPO_ROOT="$(mm_target_repo_root "$PWD")"
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 INVENTORY_JSON="$TEMP_DIR/inventory.json"
@@ -69,7 +70,7 @@ while IFS= read -r branch; do
   bash "$SCRIPT_DIR/validate_branch.sh" --repo "$REPO_ROOT" --base "$BASE" --branch "$branch" --policy "$POLICY" > "$VALID_DIR/$safe_name.json"
 done < "$TEMP_DIR/branches.txt"
 
-LEGACY_CMD="bash $REPO_ROOT/skills/review-merge-main-cleanup/scripts/review_merge_main_cleanup.sh --base $BASE ${BRANCH_PATTERN:+--branch-pattern '$BRANCH_PATTERN'} ${BRANCHES_FILE:+--branches-file '$BRANCHES_FILE'} --cleanup plan-only --report /abs/path/report.md --json"
+LEGACY_CMD="cd '$REPO_ROOT' && bash $SKILL_OWNER_ROOT/skills/review-merge-main-cleanup/scripts/review_merge_main_cleanup.sh --base $BASE ${BRANCH_PATTERN:+--branch-pattern '$BRANCH_PATTERN'} ${BRANCHES_FILE:+--branches-file '$BRANCHES_FILE'} --cleanup plan-only --report /abs/path/report.md --json"
 python3 "$SCRIPT_DIR/render_report.py" \
   --inventory "$INVENTORY_JSON" \
   --classifications-dir "$CLASS_DIR" \

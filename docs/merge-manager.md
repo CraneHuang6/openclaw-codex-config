@@ -31,6 +31,8 @@
 
 在 phase 1 中，旧 skill 仍保留原 CLI；只有可安全复用的只读核心才会与 `merge-manager` 共享。
 
+`merge-manager` 默认作用于当前调用目录所在的 git 仓库；skill 自身安装路径只用于解析脚本与静态资产，不作为 branch inventory 目标仓库。
+
 ## Dry-Run vs Future Execute
 
 - 当前开放：`--mode dry-run`
@@ -52,6 +54,8 @@ validation command detection 采用“显式优先 + 保守自动探测”：
 - 若未命中且 `detect_if_missing: true`，再尝试根目录 manifest 对应命令
 - 仍未命中时，只尝试 policy 允许的 root-only 保守脚本，不递归 nested repos
 
+phase 1 的 `scripts/lib/validation.sh` 只负责 detection helpers；dry-run replay、临时 worktree、`git merge --no-commit` 和验证命令执行保留在 `validate_branch.sh`。
+
 ## Multi-Agent Mapping
 
 - `Orchestrator`: 汇总输入、Root Cause Matrix、merge order、最终报告
@@ -63,6 +67,7 @@ validation command detection 采用“显式优先 + 保守自动探测”：
 ## Recommended Dry-Run Command
 
 ```bash
+cd /path/to/target-repo && \
 bash /Users/crane/.codex/skills/merge-manager/scripts/run_merge_manager.sh \
   --mode dry-run \
   --base main \

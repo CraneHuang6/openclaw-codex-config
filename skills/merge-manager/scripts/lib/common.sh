@@ -26,6 +26,11 @@ mm_repo_root() {
   git -C "$1" rev-parse --show-toplevel 2>/dev/null || mm_die "not inside git repo: $1"
 }
 
+mm_target_repo_root() {
+  local cwd="${1:-$PWD}"
+  mm_repo_root "$cwd"
+}
+
 mm_sanitize_name() {
   printf '%s' "$1" | sed 's#[/: ]#_#g'
 }

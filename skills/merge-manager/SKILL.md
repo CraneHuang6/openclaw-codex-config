@@ -63,11 +63,16 @@ phase 1 共享核心仅包含：
 - policy load
 - report render/assembly
 
+dry-run replay、临时 worktree、`git merge --no-commit` 与验证命令执行保留在 `validate_branch.sh`，不放进 `scripts/lib/`。
+
 不抽取 mutating merge / cleanup 逻辑。
 
 ## Core CLI
 
+先进入目标仓库，再调用全局 skill 入口：
+
 ```bash
+cd /path/to/target-repo && \
 bash /Users/crane/.codex/skills/merge-manager/scripts/run_merge_manager.sh \
   --mode dry-run \
   --base main \

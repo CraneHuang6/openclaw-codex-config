@@ -3,14 +3,24 @@
 ## Assumptions
 - base_branch:
 - merge_strategy:
-- validation_commands:
-- cleanup_legacy_entrypoint:
+- mode:
+- legacy_execute_entrypoint:
 
 ## Candidate Branches
 -
 
+## Filtered Out
+-
+
 ## Merge Order
 1.
+
+## Validation Summary
+- total_candidates:
+- ready:
+- blocked:
+- manual_review:
+- stale:
 
 ## Summary Table
 
@@ -18,6 +28,9 @@
 |---|---|---|---|---|---|---|---|
 
 ## Blockers
+-
+
+## Next Action
 -
 
 ## Exact Next Command
