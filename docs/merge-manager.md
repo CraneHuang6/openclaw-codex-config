@@ -50,6 +50,11 @@
 - 高风险目录永远人工审核；`CODEOWNERS` 是 adoption 前置项之一
 - `merge queue` 保留到 phase 2，不在 v1 对同一受保护分支做动态切换
 
+## Public Smoke Test Status
+
+- 当前公开仓库 smoke 流程已切到 GitHub branch protection + required checks + auto-merge 组合验证。
+- 首个 smoke PR 只使用低风险文档改动，用于确认 `pr-gate`、review gate 与 squash auto-merge 路线联动正常。
+
 ## Adoption Assets
 
 v1 交付但不在当前仓库启用的模板资产：
@@ -98,3 +103,9 @@ bash /Users/crane/.codex/skills/merge-manager/scripts/run_merge_manager.sh \
   --report /tmp/merge-manager.md \
   --json
 ```
+
+## Smoke Test Status
+
+- public repo smoke test path enabled on 2026-03-09
+- `main` now uses required check `pr-gate`, 1 approval, CODEOWNERS review, and squash-only auto-merge
+- phase 2 merge queue remains intentionally disabled
