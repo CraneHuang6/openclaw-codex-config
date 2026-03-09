@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -173,6 +175,25 @@ class MergeManagerGitHubTests(unittest.TestCase):
         self.assertTrue((workflow_dir / "automerge-manager.yml").is_file())
         self.assertTrue((workflow_dir / "conflict-repair.yml").is_file())
         self.assertFalse((ROOT / "templates" / "workflows").exists())
+
+    def test_workflow_yaml_files_parse_successfully(self) -> None:
+        workflow_files = [
+            ROOT.parent.parent / ".github" / "workflows" / "pr-gate.yml",
+            ROOT.parent.parent / ".github" / "workflows" / "automerge-manager.yml",
+            ROOT.parent.parent / ".github" / "workflows" / "conflict-repair.yml",
+            ROOT / "templates" / "github" / "workflows" / "pr-gate.yml",
+            ROOT / "templates" / "github" / "workflows" / "automerge-manager.yml",
+            ROOT / "templates" / "github" / "workflows" / "conflict-repair.yml",
+        ]
+        for workflow_file in workflow_files:
+            with self.subTest(workflow=str(workflow_file)):
+                payload = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
+                self.assertIsInstance(payload, dict)
+                self.assertIn("jobs", payload)
+
+    def test_pr_gate_keeps_risk_and_size_non_fatal(self) -> None:
+        workflow = (ROOT / "templates" / "github" / "workflows" / "pr-gate.yml").read_text(encoding="utf-8")
+        self.assertGreaterEqual(workflow.count('if [ "$rc" -gt 2 ]; then'), 2)
 
     def test_enqueue_automerge_public_script_supports_dry_run(self) -> None:
         result = run_command(

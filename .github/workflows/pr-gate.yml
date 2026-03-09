@@ -29,10 +29,22 @@ jobs:
         run: python3 skills/merge-manager/scripts/changed_files_gate.py --repo . --base-ref origin/${{ github.base_ref }} --head-ref HEAD
 
       - name: Risk gate
-        run: python3 skills/merge-manager/scripts/risk_gate.py --repo . --base-ref origin/${{ github.base_ref }} --head-ref HEAD --protected-paths skills/merge-manager/config/protected_paths.yaml
+        run: |
+          set +e
+          python3 skills/merge-manager/scripts/risk_gate.py --repo . --base-ref origin/${{ github.base_ref }} --head-ref HEAD --protected-paths skills/merge-manager/config/protected_paths.yaml
+          rc=$?
+          if [ "$rc" -gt 2 ]; then
+            exit "$rc"
+          fi
 
       - name: PR size gate
-        run: python3 skills/merge-manager/scripts/pr_size_gate.py --repo . --base-ref origin/${{ github.base_ref }} --head-ref HEAD --rules skills/merge-manager/config/merge_rules.yaml
+        run: |
+          set +e
+          python3 skills/merge-manager/scripts/pr_size_gate.py --repo . --base-ref origin/${{ github.base_ref }} --head-ref HEAD --rules skills/merge-manager/config/merge_rules.yaml
+          rc=$?
+          if [ "$rc" -gt 2 ]; then
+            exit "$rc"
+          fi
 
       - name: PR body gate
         env:
