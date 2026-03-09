@@ -1,0 +1,9 @@
+# Merge manager protected paths require explicit human review ownership.
+/infra/** @CraneHuang6
+/deploy/** @CraneHuang6
+/ops/** @CraneHuang6
+/db/migrations/** @CraneHuang6
+/auth/** @CraneHuang6
+/billing/** @CraneHuang6
+/.github/workflows/** @CraneHuang6
+/secrets/** @CraneHuang6
