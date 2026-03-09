@@ -28,11 +28,11 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           body_file="$(mktemp)"
-          cat > "$body_file" <<'BODY'
-          ## Conflict repair required
-          - keep scope frozen
-          - resolve only merge conflicts
-          - rerun relevant validation
-          - update PR evidence with conflict summary, revalidation commands, and remaining risks
-          BODY
+          printf '%s\n' \
+            '## Conflict repair required' \
+            '- keep scope frozen' \
+            '- resolve only merge conflicts' \
+            '- rerun relevant validation' \
+            '- update PR evidence with conflict summary, revalidation commands, and remaining risks' \
+            > "$body_file"
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$body_file"
