@@ -7,7 +7,7 @@ on:
     types: [submitted]
 
 concurrency:
-  group: automerge-${{ github.event.pull_request.number || github.event.pull_request_review.pull_request.number }}
+  group: automerge-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -27,50 +27,39 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Fetch target branch
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: git fetch origin "$BASE_REF"
+
       - name: Gather PR facts with gh
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.pull_request_review.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           REPO: ${{ github.repository }}
         run: |
           mkdir -p /tmp/merge-manager
           gh pr view "$PR_NUMBER" --repo "$REPO" --json isDraft,mergeStateStatus,reviewDecision,labels,body > /tmp/merge-manager/pr.json
           gh api repos/$REPO/pulls/$PR_NUMBER/reviews > /tmp/merge-manager/reviews.json
           gh pr checks "$PR_NUMBER" --repo "$REPO" --json state,name,bucket > /tmp/merge-manager/checks.json
-          python3 skills/merge-manager/scripts/changed_files_gate.py --repo . --base-ref origin/${{ github.base_ref || github.event.pull_request.base.ref }} --head-ref HEAD > /tmp/merge-manager/changed.json
-          python3 skills/merge-manager/scripts/risk_gate.py --repo . --base-ref origin/${{ github.base_ref || github.event.pull_request.base.ref }} --head-ref HEAD --protected-paths skills/merge-manager/config/protected_paths.yaml > /tmp/merge-manager/risk.json || true
-          python3 skills/merge-manager/scripts/pr_size_gate.py --repo . --base-ref origin/${{ github.base_ref || github.event.pull_request.base.ref }} --head-ref HEAD --rules skills/merge-manager/config/merge_rules.yaml > /tmp/merge-manager/size.json || true
+          python3 skills/merge-manager/scripts/changed_files_gate.py --repo . --base-ref origin/$BASE_REF --head-ref HEAD > /tmp/merge-manager/changed.json
+          python3 skills/merge-manager/scripts/risk_gate.py --repo . --base-ref origin/$BASE_REF --head-ref HEAD --protected-paths skills/merge-manager/config/protected_paths.yaml > /tmp/merge-manager/risk.json || true
+          python3 skills/merge-manager/scripts/pr_size_gate.py --repo . --base-ref origin/$BASE_REF --head-ref HEAD --rules skills/merge-manager/config/merge_rules.yaml > /tmp/merge-manager/size.json || true
           tmp_body="$(mktemp)"
           gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq .body > "$tmp_body"
           python3 skills/merge-manager/scripts/pr_body_gate.py --rules skills/merge-manager/config/merge_rules.yaml --body-file "$tmp_body" > /tmp/merge-manager/body.json || true
-          python3 - <<'PY'
-import json, pathlib
-pr = json.loads(pathlib.Path('/tmp/merge-manager/pr.json').read_text())
-reviews = json.loads(pathlib.Path('/tmp/merge-manager/reviews.json').read_text())
-checks = json.loads(pathlib.Path('/tmp/merge-manager/checks.json').read_text())
-risk = json.loads(pathlib.Path('/tmp/merge-manager/risk.json').read_text())
-size = json.loads(pathlib.Path('/tmp/merge-manager/size.json').read_text())
-body = json.loads(pathlib.Path('/tmp/merge-manager/body.json').read_text())
-labels = [item['name'] for item in pr.get('labels', [])]
-approvals = sum(1 for item in reviews if item.get('state') == 'APPROVED')
-state = {
-  'required_checks_passed': all(item.get('state') == 'SUCCESS' for item in checks),
-  'approval_count': approvals,
-  'has_conflicts': pr.get('mergeStateStatus') == 'DIRTY',
-  'has_blocking_label': any(label in {'manual-review-required', 'conflict-repair-needed', 'risk:high'} for label in labels),
-  'blocking_labels': [label for label in labels if label in {'manual-review-required', 'conflict-repair-needed', 'risk:high'}],
-  'protected_paths_touched': bool(risk.get('protected_paths_touched')),
-  'pr_too_large': bool(size.get('too_large')),
-  'validation_evidence_present': bool(body.get('validation_evidence_present')),
-  'rollback_plan_present': bool(body.get('rollback_plan_present')),
-  'goal_present': bool(body.get('goal_present')),
-  'scope_present': bool(body.get('scope_present')),
-  'automerge_label_present': 'automerge-candidate' in labels,
-  'manual_review_label_present': 'manual-review-required' in labels,
-  'up_to_date_with_target': pr.get('mergeStateStatus') not in {'BEHIND', 'UNKNOWN'},
-}
-pathlib.Path('/tmp/merge-manager/state.json').write_text(json.dumps(state, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-PY
+          python3 -c "import json, pathlib; \
+          pr = json.loads(pathlib.Path('/tmp/merge-manager/pr.json').read_text()); \
+          reviews = json.loads(pathlib.Path('/tmp/merge-manager/reviews.json').read_text()); \
+          checks = json.loads(pathlib.Path('/tmp/merge-manager/checks.json').read_text()); \
+          risk = json.loads(pathlib.Path('/tmp/merge-manager/risk.json').read_text()); \
+          size = json.loads(pathlib.Path('/tmp/merge-manager/size.json').read_text()); \
+          body = json.loads(pathlib.Path('/tmp/merge-manager/body.json').read_text()); \
+          labels = [item['name'] for item in pr.get('labels', [])]; \
+          approvals = sum(1 for item in reviews if item.get('state') == 'APPROVED'); \
+          state = {'required_checks_passed': all(item.get('state') == 'SUCCESS' for item in checks), 'approval_count': approvals, 'has_conflicts': pr.get('mergeStateStatus') == 'DIRTY', 'has_blocking_label': any(label in {'manual-review-required', 'conflict-repair-needed', 'risk:high'} for label in labels), 'blocking_labels': [label for label in labels if label in {'manual-review-required', 'conflict-repair-needed', 'risk:high'}], 'protected_paths_touched': bool(risk.get('protected_paths_touched')), 'pr_too_large': bool(size.get('too_large')), 'validation_evidence_present': bool(body.get('validation_evidence_present')), 'rollback_plan_present': bool(body.get('rollback_plan_present')), 'goal_present': bool(body.get('goal_present')), 'scope_present': bool(body.get('scope_present')), 'automerge_label_present': 'automerge-candidate' in labels, 'manual_review_label_present': 'manual-review-required' in labels, 'up_to_date_with_target': pr.get('mergeStateStatus') not in {'BEHIND', 'UNKNOWN'}}; \
+          pathlib.Path('/tmp/merge-manager/state.json').write_text(json.dumps(state, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')"
 
       - name: Evaluate merge readiness
         run: python3 skills/merge-manager/scripts/evaluate_merge_readiness.py --rules skills/merge-manager/config/merge_rules.yaml --state-json /tmp/merge-manager/state.json > /tmp/merge-manager/decision.json
@@ -78,6 +67,6 @@ PY
       - name: Apply merge manager decision
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.pull_request_review.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: bash skills/merge-manager/scripts/enqueue_automerge.sh --decision-json /tmp/merge-manager/decision.json --pr "$PR_NUMBER" --repo "$REPO"
