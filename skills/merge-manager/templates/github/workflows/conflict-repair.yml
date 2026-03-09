@@ -29,10 +29,10 @@ jobs:
         run: |
           body_file="$(mktemp)"
           cat > "$body_file" <<'BODY'
-## Conflict repair required
-- keep scope frozen
-- resolve only merge conflicts
-- rerun relevant validation
-- update PR evidence with conflict summary, revalidation commands, and remaining risks
-BODY
+          ## Conflict repair required
+          - keep scope frozen
+          - resolve only merge conflicts
+          - rerun relevant validation
+          - update PR evidence with conflict summary, revalidation commands, and remaining risks
+          BODY
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$body_file"
