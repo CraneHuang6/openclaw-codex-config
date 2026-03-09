@@ -8,6 +8,7 @@
 - 分析 overlap 与 merge order
 - 在 dry-run 下验证分支相对最新 `main` 的可重放性
 - 输出 Markdown + JSON 报告
+- 交付 GitHub PR gate / auto-merge / conflict-repair 模板资产
 
 ## Skill Split
 
@@ -17,6 +18,7 @@
 - inventory / classify / validate / order / report
 - multi-agent gate 映射
 - dry-run planning
+- GitHub gate config / scripts / workflow templates
 
 不负责：
 - 真正批量 merge
@@ -38,6 +40,27 @@
 - 当前开放：`--mode dry-run`
 - 当前关闭：`--mode execute`（明确返回 `not enabled in MVP`）
 - future execute 需要额外 Gate 审核与 isolated worktree 执行
+
+## GitHub v1 Positioning
+
+- GitHub Actions 是 merge manager 宿主
+- Worker 只在 task branch / worktree 开发，并负责 commit / push / 开 PR（由目标仓库采用时执行）
+- branch protection + required checks + required review 是最终硬门禁
+- `merge-manager` 只负责判定、打标签、评论、启用 `--auto --squash`
+- 高风险目录永远人工审核；`CODEOWNERS` 是 adoption 前置项之一
+- `merge queue` 保留到 phase 2，不在 v1 对同一受保护分支做动态切换
+
+## Adoption Assets
+
+v1 交付但不在当前仓库启用的模板资产：
+- `skills/merge-manager/templates/github/workflows/pr-gate.yml`
+- `skills/merge-manager/templates/github/workflows/automerge-manager.yml`
+- `skills/merge-manager/templates/github/workflows/conflict-repair.yml`
+- `skills/merge-manager/templates/pr_template.md`
+- `skills/merge-manager/config/*.yaml`
+- `skills/merge-manager/prompts/*.md`
+
+推荐把整个 `skills/merge-manager/` vendoring 到目标仓库，再把 workflow 模板复制到目标仓库 `.github/workflows/`。
 
 ## Phase 2 Filtering
 

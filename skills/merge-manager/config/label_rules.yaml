@@ -1,0 +1,13 @@
+labels:
+  automerge_candidate: "automerge-candidate"
+  manual_review: "manual-review-required"
+  conflict_repair: "conflict-repair-needed"
+
+risk_labels:
+  low: "risk:low"
+  medium: "risk:medium"
+  high: "risk:high"
+
+size_labels:
+  small: "size:small"
+  large: "size:large"

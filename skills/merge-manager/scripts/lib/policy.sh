@@ -114,3 +114,19 @@ mm_policy_nested_scalar() {
     printf '%s\n' "$fallback"
   fi
 }
+
+mm_resolve_policy_file() {
+  local script_dir="$1"
+  local explicit_policy="${2:-}"
+  if [[ -n "$explicit_policy" ]]; then
+    mm_abs_path "$explicit_policy"
+    return 0
+  fi
+
+  local derived_policy
+  derived_policy="$(mktemp "${TMPDIR:-/tmp}/merge-manager-policy.XXXXXX.yaml")"
+  python3 "$script_dir/generate_legacy_policy.py" \
+    --config-dir "$script_dir/../config" \
+    --output "$derived_policy" >/dev/null
+  printf '%s\n' "$derived_policy"
+}

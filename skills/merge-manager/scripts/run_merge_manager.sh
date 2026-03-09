@@ -18,7 +18,7 @@ BASE="main"
 REPORT_PATH=""
 BRANCH_PATTERN=""
 BRANCHES_FILE=""
-POLICY="$SCRIPT_DIR/../assets/merge-policy.yaml"
+POLICY=""
 PRINT_JSON=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,6 +54,11 @@ INVENTORY_JSON="$TEMP_DIR/inventory.json"
 CLASS_DIR="$TEMP_DIR/classifications"
 VALID_DIR="$TEMP_DIR/validations"
 mkdir -p "$CLASS_DIR" "$VALID_DIR"
+
+if [[ -z "$POLICY" ]]; then
+  POLICY="$TEMP_DIR/derived-legacy-policy.yaml"
+  python3 "$SCRIPT_DIR/generate_legacy_policy.py" --config-dir "$SCRIPT_DIR/../config" --output "$POLICY"
+fi
 
 bash "$SCRIPT_DIR/inventory_branches.sh" --repo "$REPO_ROOT" --base "$BASE" --policy "$POLICY" ${BRANCH_PATTERN:+--branch-pattern "$BRANCH_PATTERN"} ${BRANCHES_FILE:+--branches-file "$BRANCHES_FILE"} > "$INVENTORY_JSON"
 

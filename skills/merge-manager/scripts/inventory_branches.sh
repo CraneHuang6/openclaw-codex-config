@@ -14,9 +14,16 @@ USAGE
 
 REPO=""
 BASE="main"
-POLICY="$SCRIPT_DIR/../assets/merge-policy.yaml"
+POLICY=""
+TEMP_POLICY=""
 BRANCH_PATTERN=""
 BRANCHES_FILE=""
+cleanup() {
+  if [[ -n "$TEMP_POLICY" ]]; then
+    rm -f "$TEMP_POLICY"
+  fi
+}
+trap cleanup EXIT
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO="$2"; shift 2 ;;
@@ -30,6 +37,11 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$REPO" ]] || mm_die "--repo is required"
 REPO="$(mm_repo_root "$REPO")"
+if [[ -z "$POLICY" ]]; then
+  TEMP_POLICY="$(mktemp "${TMPDIR:-/tmp}/merge-manager-policy.XXXXXX")"
+  python3 "$SCRIPT_DIR/generate_legacy_policy.py" --config-dir "$SCRIPT_DIR/../config" --output "$TEMP_POLICY"
+  POLICY="$TEMP_POLICY"
+fi
 PROTECTED=()
 while IFS= read -r protected_branch; do
   [[ -n "$protected_branch" ]] || continue
@@ -44,7 +56,7 @@ done < <(mm_inventory_candidates "$REPO" "$BASE" "$BRANCHES_FILE" "$BRANCH_PATTE
 
 CANDIDATES_FILE="$(mktemp)"
 WORKTREE_FILE="$(mktemp)"
-trap 'rm -f "$CANDIDATES_FILE" "$WORKTREE_FILE"' EXIT
+trap 'rm -f "$CANDIDATES_FILE" "$WORKTREE_FILE"; cleanup' EXIT
 for branch in "${CANDIDATES[@]-}"; do
   [[ -n "$branch" ]] || continue
   printf '%s\n' "$branch" >> "$CANDIDATES_FILE"

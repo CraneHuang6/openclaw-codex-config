@@ -1,0 +1,38 @@
+name: conflict-repair
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+jobs:
+  detect-conflict:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'conflict-repair-needed')
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch target branch
+        run: git fetch origin ${{ github.base_ref }}
+
+      - name: Detect conflict
+        run: bash skills/merge-manager/scripts/conflict_detector.sh --repo . --base-ref origin/${{ github.base_ref }} --head-ref HEAD
+
+      - name: Publish handoff reminder
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          body_file="$(mktemp)"
+          cat > "$body_file" <<'BODY'
+## Conflict repair required
+- keep scope frozen
+- resolve only merge conflicts
+- rerun relevant validation
+- update PR evidence with conflict summary, revalidation commands, and remaining risks
+BODY
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$body_file"

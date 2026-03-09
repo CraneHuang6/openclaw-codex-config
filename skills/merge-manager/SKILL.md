@@ -7,14 +7,15 @@ description: 使用 multi-agent 门禁来盘点、分类、验证、排序并生
 
 ## Overview
 
-`merge-manager` 是本地 branch 集成的制度层与编排层：
+`merge-manager` 是本地 branch 集成与 GitHub PR 门禁的制度层与编排层：
 
 1. inventory 候选分支
 2. classify 风险与高风险路径
 3. detect overlap 与 merge order
 4. validate 分支在最新 base 上的可重放性与验证命令结果
 5. 生成 dry-run Markdown + JSON 报告
-6. 为 future execute 预留入口，但 MVP 不执行真实 merge
+6. 交付 GitHub `pr-gate` / `automerge-manager` / `conflict-repair` 模板资产
+7. 为 future execute 预留入口，但 MVP 不执行真实 merge
 
 ## Role Model
 
@@ -39,6 +40,17 @@ description: 使用 multi-agent 门禁来盘点、分类、验证、排序并生
 - 真实执行 legacy 自动收敛
 - 兼容既有调用方
 - 已批准 merge/cleanup 的执行阶段
+
+## GitHub Automation Assets
+
+v1 新增的 GitHub-oriented 资产位于：
+- `config/`: `merge_rules.yaml`、`protected_paths.yaml`、`label_rules.yaml`
+- `scripts/`: `changed_files_gate.py`、`risk_gate.py`、`pr_size_gate.py`、`pr_body_gate.py`、`evaluate_merge_readiness.py`、`enqueue_automerge.sh`、`conflict_detector.sh`
+- `templates/github/workflows/`: `pr-gate.yml`、`automerge-manager.yml`、`conflict-repair.yml`
+- `templates/`: PR / issue / handoff 模板
+- `prompts/`: Worker / Reviewer / Merge Manager / Conflict Repair
+
+这些 workflow 是模板资产，不会作为当前 skill 仓库的活跃 workflow 运行。
 
 ## MVP Boundaries
 
@@ -101,3 +113,4 @@ phase 2 dry-run 额外要求：
 - 过滤已经并入 base 的本地分支
 - validation command detection 采用显式优先 + 保守 root-only 自动探测
 - 不递归 nested repos 寻找验证命令
+- merge queue 保留到 phase 2；当前只会输出 `ENABLE_AUTO_MERGE`，不会动态切 queue

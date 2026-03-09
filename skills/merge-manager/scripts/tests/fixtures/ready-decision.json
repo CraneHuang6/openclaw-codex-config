@@ -1,0 +1,6 @@
+{
+  "decision": "ENABLE_AUTO_MERGE",
+  "failure_comment": "",
+  "labels_to_add": ["risk:low", "size:small"],
+  "labels_to_remove": ["manual-review-required", "conflict-repair-needed"]
+}

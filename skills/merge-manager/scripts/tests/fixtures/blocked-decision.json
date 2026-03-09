@@ -1,0 +1,6 @@
+{
+  "decision": "REQUIRE_MANUAL_REVIEW",
+  "failure_comment": "manual review required because protected paths were touched",
+  "labels_to_add": ["manual-review-required", "risk:high"],
+  "labels_to_remove": ["automerge-candidate"]
+}

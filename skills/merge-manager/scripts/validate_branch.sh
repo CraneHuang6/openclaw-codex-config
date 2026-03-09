@@ -120,7 +120,14 @@ validate_branch_json() {
 REPO=""
 BASE="main"
 BRANCH=""
-POLICY="$SCRIPT_DIR/../assets/merge-policy.yaml"
+POLICY=""
+TEMP_POLICY=""
+cleanup() {
+  if [[ -n "$TEMP_POLICY" ]]; then
+    rm -f "$TEMP_POLICY"
+  fi
+}
+trap cleanup EXIT
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO="$2"; shift 2 ;;
@@ -133,4 +140,9 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$REPO" && -n "$BRANCH" ]] || mm_die "--repo and --branch are required"
 REPO="$(mm_repo_root "$REPO")"
+if [[ -z "$POLICY" ]]; then
+  TEMP_POLICY="$(mktemp "${TMPDIR:-/tmp}/merge-manager-policy.XXXXXX")"
+  python3 "$SCRIPT_DIR/generate_legacy_policy.py" --config-dir "$SCRIPT_DIR/../config" --output "$TEMP_POLICY"
+  POLICY="$TEMP_POLICY"
+fi
 validate_branch_json "$REPO" "$BASE" "$BRANCH" "$POLICY"

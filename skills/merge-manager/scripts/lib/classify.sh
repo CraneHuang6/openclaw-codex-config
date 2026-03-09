@@ -2,6 +2,19 @@
 # Risk classification helpers for merge-manager.
 # Exposes a compatibility function reused by review-merge-main-cleanup.
 
+mm_changed_files_match_policy_glob() {
+  local changed_files="$1"
+  local path_pattern="$2"
+  local changed_path
+  while IFS= read -r changed_path; do
+    [[ -n "$changed_path" ]] || continue
+    if [[ "$changed_path" == $path_pattern ]]; then
+      return 0
+    fi
+  done <<< "$changed_files"
+  return 1
+}
+
 merge_manager_shared_classify_branch() {
   local exec_dir="$1"
   local base="$2"
@@ -16,6 +29,16 @@ merge_manager_shared_classify_branch() {
   local changed_count
   changed_count="$(printf '%s\n' "$changed_files" | sed '/^$/d' | wc -l | tr -d ' ')"
   printf '%s\n' "$changed_count" > "$changed_count_file"
+
+  local policy_file="${MERGE_MANAGER_POLICY_FILE:-}"
+  if [[ -n "$policy_file" && -f "$policy_file" ]]; then
+    while IFS= read -r path_pattern; do
+      [[ -n "$path_pattern" ]] || continue
+      if mm_changed_files_match_policy_glob "$changed_files" "$path_pattern"; then
+        echo "命中高风险路径(${path_pattern})" >> "$reasons_file"
+      fi
+    done < <(mm_policy_list "$policy_file" high_risk_paths)
+  fi
 
   if printf '%s\n' "$changed_files" | grep -Eq '^(browser/openclaw/user-data/|memory/.*\.sqlite$|media/inbound/|workspace(/|$)|exec-approvals\.json$|delivery-queue/|run/|tmp/)'; then
     echo "运行态/缓存/数据库/媒体落地文件改动" >> "$reasons_file"
@@ -48,6 +71,7 @@ mm_classification_json() {
   reasons_file="$(mktemp)"
   binary_count_file="$(mktemp)"
   changed_count_file="$(mktemp)"
+  export MERGE_MANAGER_POLICY_FILE="$policy_file"
   merge_manager_shared_classify_branch "$repo_root" "$base" "$branch" "$reasons_file" "$binary_count_file" "$changed_count_file"
 
   local changed_files age_days stale_days docs_only tests_only only_docs_tests has_high_risk_path risk_level category reason_count
@@ -75,9 +99,6 @@ PY
     if [[ ! "$path" =~ ^(tests?/|test/|.*(_test|\.test)\.) ]]; then
       tests_only=no
     fi
-    if [[ "$path" == .github/workflows/* || "$path" == migrations/* || "$path" == infra/* || "$path" == deploy/* || "$path" == auth/* || "$path" == billing/* ]]; then
-      has_high_risk_path=yes
-    fi
     if [[ "$path" != */* ]]; then
       case "$path" in
         *.json|*.toml|*.yaml|*.yml|*.rules|*.sh)
@@ -96,6 +117,12 @@ PY
     only_docs_tests=yes
     category=docs_tests
   fi
+  while IFS= read -r path_pattern; do
+    [[ -n "$path_pattern" ]] || continue
+    if mm_changed_files_match_policy_glob "$changed_files" "$path_pattern"; then
+      has_high_risk_path=yes
+    fi
+  done < <(mm_policy_list "$policy_file" high_risk_paths)
 
   reason_count="$(sed '/^$/d' "$reasons_file" | wc -l | tr -d ' ')"
   if [[ "$has_high_risk_path" == yes || "$reason_count" -gt 0 ]]; then

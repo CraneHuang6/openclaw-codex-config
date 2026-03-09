@@ -1,20 +1,19 @@
 base_branch: main
 merge_strategy: squash
 delete_merged_local_branches: true
-
 protected_branches:
   - main
   - master
   - develop
-
 high_risk_paths:
-  - ".github/workflows/**"
-  - "migrations/**"
   - "infra/**"
   - "deploy/**"
+  - "ops/**"
+  - "db/migrations/**"
   - "auth/**"
   - "billing/**"
-
+  - ".github/workflows/**"
+  - "secrets/**"
 validation_commands:
   detect_if_missing: true
   explicit:
@@ -25,7 +24,6 @@ validation_commands:
     - "npm test"
   conservative_root_scripts:
     - "bash scripts/check-agent-contracts.sh"
-
 classification_rules:
   docs_only_is_safe: true
   tests_only_is_safe: true

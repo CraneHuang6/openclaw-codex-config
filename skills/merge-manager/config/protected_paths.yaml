@@ -1,0 +1,9 @@
+protected_paths:
+  - "infra/**"
+  - "deploy/**"
+  - "ops/**"
+  - "db/migrations/**"
+  - "auth/**"
+  - "billing/**"
+  - ".github/workflows/**"
+  - "secrets/**"

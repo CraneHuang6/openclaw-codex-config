@@ -1,4 +1,4 @@
 interface:
   display_name: "Merge Manager"
-  short_description: "盘点、分类、验证并生成本地分支 dry-run 集成报告"
-  default_prompt: "Use $merge-manager to scan local branches, classify risk, validate dry-run integration readiness, and render a merge planning report without executing real merges."
+  short_description: "盘点、分类、验证本地分支，并交付 GitHub PR gate / auto-merge 模板资产"
+  default_prompt: "Use $merge-manager to scan local branches, classify risk, validate dry-run integration readiness, and prepare GitHub PR gate / auto-merge assets without bypassing required checks or manual review policy."

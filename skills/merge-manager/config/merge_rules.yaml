@@ -1,0 +1,54 @@
+target_branch: main
+
+merge_method: squash
+phase2_merge_queue_ready_pr_threshold: 2
+
+dry_run:
+  delete_merged_local_branches: true
+  protected_branches:
+    - main
+    - master
+    - develop
+  validation_commands:
+    detect_if_missing: true
+    explicit:
+      - "bash scripts/check-agent-contracts.sh"
+    preferred:
+      - "npm run lint"
+      - "npm run typecheck"
+      - "npm test"
+    conservative_root_scripts:
+      - "bash scripts/check-agent-contracts.sh"
+  classification_rules:
+    docs_only_is_safe: true
+    tests_only_is_safe: true
+    root_config_is_high_risk: true
+    large_cross_cutting_change_is_high_risk: true
+    overlapping_core_files_requires_manual_review: true
+    stale_branch_days: 14
+
+automerge:
+  enabled: true
+  require_label: automerge-candidate
+  block_labels:
+    - manual-review-required
+    - conflict-repair-needed
+    - risk:high
+
+checks:
+  require_all_required_checks_passed: true
+  require_review_approval_count: 1
+  require_up_to_date_with_target: true
+
+pr_size:
+  max_files_changed: 20
+  max_lines_changed: 800
+
+risk:
+  protected_paths_file: skills/merge-manager/config/protected_paths.yaml
+
+policy:
+  require_validation_evidence_in_pr_body: true
+  require_rollback_plan_in_pr_body: true
+  require_goal_section_in_pr_body: true
+  require_scope_section_in_pr_body: true

@@ -1,0 +1,16 @@
+{
+  "required_checks_passed": false,
+  "approval_count": 0,
+  "has_conflicts": false,
+  "has_blocking_label": true,
+  "blocking_labels": ["risk:high"],
+  "protected_paths_touched": false,
+  "pr_too_large": false,
+  "validation_evidence_present": false,
+  "rollback_plan_present": false,
+  "goal_present": false,
+  "scope_present": false,
+  "automerge_label_present": false,
+  "manual_review_label_present": false,
+  "up_to_date_with_target": false
+}

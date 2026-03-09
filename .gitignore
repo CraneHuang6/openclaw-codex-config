@@ -31,3 +31,5 @@ state_*.sqlite-wal
 
 # Automation runtime memory snapshots
 automations/*/memory.md
+__pycache__/
+*.pyc

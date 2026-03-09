@@ -1,0 +1,43 @@
+name: pr-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled, ready_for_review]
+
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Fetch target branch
+        run: git fetch origin ${{ github.base_ref }}
+
+      - name: Changed files gate
+        run: python3 skills/merge-manager/scripts/changed_files_gate.py --repo . --base-ref origin/${{ github.base_ref }} --head-ref HEAD
+
+      - name: Risk gate
+        run: python3 skills/merge-manager/scripts/risk_gate.py --repo . --base-ref origin/${{ github.base_ref }} --head-ref HEAD --protected-paths skills/merge-manager/config/protected_paths.yaml
+
+      - name: PR size gate
+        run: python3 skills/merge-manager/scripts/pr_size_gate.py --repo . --base-ref origin/${{ github.base_ref }} --head-ref HEAD --rules skills/merge-manager/config/merge_rules.yaml
+
+      - name: PR body gate
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          tmp_body="$(mktemp)"
+          printf '%s\n' "$PR_BODY" > "$tmp_body"
+          python3 skills/merge-manager/scripts/pr_body_gate.py --rules skills/merge-manager/config/merge_rules.yaml --body-file "$tmp_body"
