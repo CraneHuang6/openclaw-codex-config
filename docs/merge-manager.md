@@ -103,3 +103,9 @@ bash /Users/crane/.codex/skills/merge-manager/scripts/run_merge_manager.sh \
   --report /tmp/merge-manager.md \
   --json
 ```
+
+## Smoke Test Status
+
+- public repo smoke test path enabled on 2026-03-09
+- `main` now uses required check `pr-gate`, 1 approval, CODEOWNERS review, and squash-only auto-merge
+- phase 2 merge queue remains intentionally disabled
